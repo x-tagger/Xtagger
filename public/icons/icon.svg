@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="28" fill="#1d9bf0"/>
+  <path d="M28 44 L28 76 L60 108 L100 68 L68 36 L36 36 Z" fill="white" opacity="0.15"/>
+  <path d="M30 42 L30 74 L62 106 L98 70 L66 34 L34 34 Z" fill="none" stroke="white" stroke-width="5" stroke-linejoin="round"/>
+  <circle cx="50" cy="52" r="7" fill="white"/>
+  <text x="64" y="80" text-anchor="middle" font-family="system-ui" font-size="32" font-weight="700" fill="white">🏷</text>
+</svg>

@@ -94,3 +94,33 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 - Content script entry point wires HoverTrigger + TagEditorPopover into the pipeline
 - ADR-005 preserved; no new architectural decisions needed (follows established patterns)
 - Unit tests: TagEditorPopover (9), HoverTrigger (8)
+
+### Added (Phase 4 — Polish, Onboarding & Accessibility)
+- `ContextMenuManager` — right-click "Tag @username" entry on X.com links/selection
+  - Extracts username from profile URLs or @-prefixed selected text
+  - "Open XTagger" popup shortcut
+  - Registered on install/update/startup (handles update refresh)
+- Onboarding page (`public/onboarding.html` + `src/ui/onboarding/main.ts`)
+  - 4-step walkthrough: hover → add tag → see in feed → share
+  - Keyboard navigation (← / → arrow keys)
+  - Progress dots (clickable)
+  - Privacy assurance callout
+  - Auto-opens as a tab on fresh install via `onInstalled` handler
+- `Announcer` — ARIA live region for screen reader notifications
+  - Announces tag saved/deleted events politely
+  - Visually hidden, accessible to all screen readers
+  - Auto-clears after 3 seconds
+- Keyboard navigation in `TagEditorPopover` colour palette
+  - Arrow keys (←/→/↑/↓), Home/End for palette navigation
+  - `role="radiogroup"` + `role="radio"` + `aria-pressed` for full ARIA compliance
+  - Roving `tabindex` pattern (only selected swatch is in tab order)
+- `settings:push` message handling in content script
+  - Popup broadcasts settings changes to all open X.com tabs
+  - Display mode changes take effect immediately without page reload
+- `content:open-tag-editor` message channel
+  - Background sends this from context menu clicks to the active tab
+- Background worker updated with context menu registration and onboarding tab open
+- Manifest v2 → added `contextMenus` + `tabs` permissions, `onboarding.html` web_accessible_resource
+- Extension icons generated (16, 32, 48, 128px PNG) from Python Pillow
+- Vite build config updated with `onboarding` entry point
+- Unit tests: Announcer (5), ContextMenuManager (6)

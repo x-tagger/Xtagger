@@ -3,51 +3,47 @@
  * @layer Background Service Worker Entry Point
  * @description Manifest V3 service worker. Stateless — all state lives in IndexedDB.
  *
- * CRITICAL: MV3 service workers start and stop unpredictably.
- * - Every handler must work on cold start (no assumed in-memory state)
- * - IDB connection is re-established on each activation if needed
- * - No global mutable state outside of the wired service instances
- *
  * Wiring order:
- *   Logger → IDBAdapter → MigrationService → TagService → ImportExportService → MessageRouter
+ *   Logger → IDBAdapter → MigrationService → TagService → ImportExportService
+ *   → MessageRouter → ContextMenuManager
  */
 
-import { IDBAdapter }        from '@adapters/storage/idb-adapter';
-import { MigrationService }  from '@adapters/storage/migration-service';
-import { MessageRouter }     from '@adapters/chrome/message-router';
-import { TagService }        from '@core/services/tag-service';
+import { IDBAdapter }          from '@adapters/storage/idb-adapter';
+import { MigrationService }    from '@adapters/storage/migration-service';
+import { MessageRouter }       from '@adapters/chrome/message-router';
+import { ContextMenuManager }  from '@adapters/chrome/context-menu';
+import { TagService }          from '@core/services/tag-service';
 import { ImportExportService } from '@core/services/import-export';
 import { DefaultConflictResolver } from '@core/services/conflict-resolver';
-import { EventBus }          from '@core/events/event-bus';
-import { ConsoleLogger }     from '@shared/logger';
+import { EventBus }            from '@core/events/event-bus';
+import { ConsoleLogger }       from '@shared/logger';
 import { CURRENT_SCHEMA_VERSION } from '@core/shared/constants';
 
-// ─── Instantiation ────────────────────────────────────────────────────────────
-// All wiring happens at module level — runs once per service worker activation.
+// ─── Service instances ────────────────────────────────────────────────────────
 
 const logger   = new ConsoleLogger('BG', 'info');
 const storage  = new IDBAdapter(logger);
 const bus      = new EventBus();
 const resolver = new DefaultConflictResolver();
 
-const tagService     = new TagService(storage, bus, logger);
-const importExport   = new ImportExportService(storage, bus, resolver, logger);
-const router         = new MessageRouter(tagService, importExport, storage, logger);
+const tagService   = new TagService(storage, bus, logger);
+const importExport = new ImportExportService(storage, bus, resolver, logger);
+const router       = new MessageRouter(tagService, importExport, storage, logger);
+const contextMenu  = new ContextMenuManager(logger);
 
-// ─── Initialise DB and register message handlers ──────────────────────────────
+// ─── Initialisation ───────────────────────────────────────────────────────────
 
 async function initialise(): Promise<void> {
   const openResult = await storage.open();
   if (!openResult.ok) {
     logger.error('Failed to open IDB on startup', { error: openResult.error });
-    // Don't crash — popup still needs to work for diagnostics
     return;
   }
   router.register();
   logger.info('Background ready', { version: chrome.runtime.getManifest().version });
 }
 
-// ─── Lifecycle Handlers ───────────────────────────────────────────────────────
+// ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   logger.info('onInstalled', { reason: details.reason, previousVersion: details.previousVersion });
@@ -65,24 +61,35 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     return;
   }
 
+  // Register context menu on install/update
+  contextMenu.register();
+
   if (details.reason === 'install') {
-    logger.info('Fresh install — schema initialised', { version: CURRENT_SCHEMA_VERSION });
-    // Phase 4: open onboarding tab
-    // chrome.tabs.create({ url: chrome.runtime.getURL('onboarding.html') });
+    logger.info('Fresh install — opening onboarding', { version: CURRENT_SCHEMA_VERSION });
+    // Open onboarding tab on fresh install
+    chrome.tabs.create({
+      url: chrome.runtime.getURL('onboarding.html'),
+    });
   }
 
   if (details.reason === 'update') {
-    logger.info('Extension updated', {
-      from: details.previousVersion,
-      to: chrome.runtime.getManifest().version,
-    });
+    logger.info('Updated', { from: details.previousVersion, to: chrome.runtime.getManifest().version });
   }
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  logger.info('Browser startup — service worker waking');
+  logger.info('Browser startup');
+  // Re-register context menus (cleared on browser restart in some Chromium builds)
+  contextMenu.register();
+
   const migrations = new MigrationService(storage, logger);
   await migrations.runPendingMigrations();
+});
+
+// ─── Context menu handler ─────────────────────────────────────────────────────
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  contextMenu.handleClick(info, tab);
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────

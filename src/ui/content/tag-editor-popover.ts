@@ -31,6 +31,7 @@ import type {
 
 import { sendMessage }   from '@shared/messages';
 import { getBasePalette, getColor } from '@core/services/color-palette';
+import { announce } from './announcer';
 
 // ─── Singleton management ─────────────────────────────────────────────────────
 
@@ -135,6 +136,9 @@ export class TagEditorPopover {
         style="background:${color.hex};"
         title="${color.name}"
         aria-label="${color.name}${i === this.selectedColorIndex ? ' (selected)' : ''}"
+        aria-pressed="${i === this.selectedColorIndex}"
+        tabindex="${i === this.selectedColorIndex ? '0' : '-1'}"
+        role="radio"
       ></button>
     `).join('');
 
@@ -348,7 +352,7 @@ export class TagEditorPopover {
 
           <div>
             <label>Colour</label>
-            <div class="palette" id="xt-palette">${paletteHTML}</div>
+            <div class="palette" id="xt-palette" role="radiogroup" aria-label="Tag colour">${paletteHTML}</div>
           </div>
 
           <div>
@@ -401,16 +405,48 @@ export class TagEditorPopover {
       opts.onClosed();
     });
 
-    // Palette selection
-    shadow.querySelector('#xt-palette')?.addEventListener('click', (e) => {
-      const swatch = (e.target as Element).closest('.color-swatch') as HTMLElement | null;
-      if (!swatch) return;
-      this.selectedColorIndex = Number(swatch.dataset['index'] ?? 0);
-      shadow.querySelectorAll('.color-swatch').forEach((s, i) => {
-        s.classList.toggle('selected', i === this.selectedColorIndex);
+    // Palette selection: click or keyboard (arrow keys)
+    const paletteEl = shadow.querySelector('#xt-palette');
+    const PALETTE_COLS = 8;
+    const PALETTE_SIZE = 16;
+
+    const selectSwatch = (index: number): void => {
+      this.selectedColorIndex = Math.max(0, Math.min(PALETTE_SIZE - 1, index));
+      shadow.querySelectorAll<HTMLElement>('.color-swatch').forEach((s, i) => {
+        const isSelected = i === this.selectedColorIndex;
+        s.classList.toggle('selected', isSelected);
+        s.setAttribute('aria-pressed', String(isSelected));
+        s.setAttribute('tabindex', isSelected ? '0' : '-1');
         s.setAttribute('aria-label',
-          getBasePalette()[i]?.name + (i === this.selectedColorIndex ? ' (selected)' : ''));
+          (getBasePalette()[i]?.name ?? '') + (isSelected ? ' (selected)' : ''));
       });
+      // Move focus to selected swatch
+      const selected = shadow.querySelector<HTMLElement>('.color-swatch.selected');
+      selected?.focus();
+    };
+
+    paletteEl?.addEventListener('click', (e) => {
+      const swatch = (e.target as Element).closest('.color-swatch') as HTMLElement | null;
+      if (swatch) selectSwatch(Number(swatch.dataset['index'] ?? 0));
+    });
+
+    paletteEl?.addEventListener('keydown', (e) => {
+      const swatches = shadow.querySelectorAll<HTMLElement>('.color-swatch');
+      const cur = this.selectedColorIndex;
+      let next = cur;
+
+      switch (e.key) {
+        case 'ArrowRight': next = cur + 1; break;
+        case 'ArrowLeft':  next = cur - 1; break;
+        case 'ArrowDown':  next = cur + PALETTE_COLS; break;
+        case 'ArrowUp':    next = cur - PALETTE_COLS; break;
+        case 'Home':       next = 0; break;
+        case 'End':        next = swatches.length - 1; break;
+        default: return;
+      }
+
+      e.preventDefault();
+      selectSwatch(next);
     });
 
     // Notes toggle
@@ -479,6 +515,7 @@ export class TagEditorPopover {
       });
 
       this.close();
+      announce(`Tag deleted from @${opts.userId.username}`, 'polite');
       opts.onDeleted(opts.existingTag.id);
     });
 
@@ -566,6 +603,12 @@ export class TagEditorPopover {
 
     if (savedTag) {
       this.close();
+      announce(
+        opts.mode === 'add'
+          ? `Tag "${savedTag.name}" added to @${opts.userId.username}`
+          : `Tag "${savedTag.name}" updated`,
+        'polite',
+      );
       opts.onSaved(savedTag);
     } else {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = opts.mode === 'add' ? 'Add tag' : 'Update'; }
