@@ -31,3 +31,38 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 - X.com selector config v1
 - ADRs 001–003
 - Forgejo Actions CI/CD pipeline
+
+### Added (Phase 2 — Platform Adapter)
+- `SelectorEngine` — 4-strategy fallback chain (testid → aria → structural → text)
+  - External JSON config loading
+  - Per-selector failure counting + recovery detection
+  - `selector:failed` / `selector:recovered` EventBus integration
+  - Diagnostics API for popup debug panel
+- `UserDetector` — finds `@username` from tweet cards via href parsing + @ text
+  - Deduplication within a scan pass
+  - Reserved path filtering (/home, /explore, etc.)
+  - Username normalisation (lowercase)
+- `NavigationObserver` — SPA navigation detection via History API patching + popstate
+  - `navigation:changed` EventBus integration
+  - Correct previous/current URL tracking
+- `InjectionManager` — Shadow DOM tag pill injection
+  - `compact` mode: coloured 8px dots with hover tooltips
+  - `pills` mode: coloured pill with tag name text
+  - WeakRef tracking for GC-safe element management
+  - `remove()` / `removeAll()` for cleanup on navigation
+- `InjectionPipeline` — full MutationObserver-driven injection orchestrator
+  - In-memory tag cache (Map<username, Tag[]>) to avoid redundant IPC
+  - requestAnimationFrame batching (max 20 elements/frame)
+  - Cache invalidation on tag:created/updated/deleted events
+  - Navigation-triggered cleanup + re-scan
+  - Settings change propagation (displayMode switches)
+- `FailureNotifier` — Shadow DOM notification banner for selector failures
+  - Auto-dismisses after 8 seconds
+  - Deduplicated (one banner at a time)
+- `XPlatformAdapter` — wires above modules into `PlatformPort`
+- Full content script entry point (`src/ui/content/index.ts`)
+  - Settings-aware boot (respects `hidden` display mode)
+  - Bundled selector config loading via `chrome.runtime.getURL`
+  - Duplicate-init guard
+- ADR-005: Platform adapter design decisions
+- Unit tests: SelectorEngine (15), UserDetector (9), InjectionManager (11), NavigationObserver (7)
