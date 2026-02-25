@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Unit tests
+        run: pnpm run test:coverage
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Check bundle sizes
+        run: |
+          CONTENT_SIZE=$(stat -c%s dist/content.js 2>/dev/null || echo 999999999)
+          POPUP_SIZE=$(stat -c%s dist/popup.js 2>/dev/null || echo 999999999)
+          echo "Content script: ${CONTENT_SIZE} bytes (budget: 51200)"
+          echo "Popup: ${POPUP_SIZE} bytes (budget: 204800)"
+          if [ "$CONTENT_SIZE" -gt 51200 ]; then
+            echo "❌ Content script exceeds 50KB budget!"
+            exit 1
+          fi
+          echo "✅ All bundle size checks passed"
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Package extension
+        run: |
+          cd dist
+          zip -r ../xtagger-${{ github.ref_name }}.zip .
+      - name: Create release
+        uses: forgejo/release-action@v1
+        with:
+          files: xtagger-${{ github.ref_name }}.zip

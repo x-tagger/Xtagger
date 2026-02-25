@@ -1,0 +1,39 @@
+name: Selector Verification
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: 'Verbose logging'
+        type: boolean
+        default: false
+
+jobs:
+  verify-selectors:
+    name: Verify X.com Selectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install chromium --with-deps
+      - name: Run selector verification
+        run: node scripts/verify-selectors.js
+        env:
+          VERBOSE: ${{ inputs.verbose }}
+      - name: Upload selector check report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selector-report
+          path: selector-report/
