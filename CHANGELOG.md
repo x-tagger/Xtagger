@@ -1,30 +1,33 @@
 # Changelog
 
 All notable changes to XTagger are documented here.
-Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versioning: [Semantic Versioning](https://semver.org/).
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-- Project scaffold: TypeScript strict config, pnpm, Biome, Vite
-- Core domain types: `Result<T,E>`, complete error hierarchy, entity types
+### Added (Phase 1 — Storage Layer)
+- `IDBAdapter` — full `StoragePort` implementation using IndexedDB
+  - Tag CRUD with indexed queries
+  - Soft delete with `purgeDeletedTags`
+  - Bulk save for import operations
+  - Settings persistence
+  - Schema version tracking
+- `MigrationService` — versioned forward-only schema migrations
+- `ChromeAdapter` — `BrowserPort` implementation for Chrome MV3 messaging
+- `MessageRouter` — typed request/response channel routing in service worker
+- `ConsoleLogger` / `NoopLogger` — `LoggerPort` implementations
+- Typed message protocol (`src/shared/messages.ts`) — all 12 channels defined
+- Fully-wired background service worker with proper MV3 lifecycle handling
+- Integration tests: IDBAdapter (17 tests), ImportExport (9 tests), MigrationService (4 tests)
+- `fake-indexeddb` dev dependency for Node-based IDB testing
+
+### Added (Phase 0 — Foundation)
+- Core domain: `Result<T,E>`, `EventBus`, entity types, Zod schemas
 - Port interfaces: `StoragePort`, `PlatformPort`, `BrowserPort`, `LoggerPort`
-- Typed `EventBus` with full event map
-- `TagService` stub (interface + dependency wiring; implementation in Phase 1)
-- Curated 16-color standard palette + 16-color extended palette
-- Zod validation schemas for all domain entities
-- X.com selector configuration JSON (v1, priority chain: testid → aria → structural)
-- Chrome Extension Manifest V3 with correct permissions
-- Forgejo Actions CI pipeline (lint → typecheck → test → build → size check)
-- Daily selector verification workflow
-- Architecture documentation with module map and event flow diagrams
-- ADR-001 (Hexagonal Architecture), ADR-004 (Result Types)
-- README, CONTRIBUTING, CHANGELOG
-
----
-
-*Phase 0 complete — foundation scaffold. All compilation targets wired. Ready for Phase 1: Core Domain implementation.*
-
-## [0.1.0] — Phase 0 Foundation
-*Target: internal development only. Not for distribution.*
+- Services: `TagService`, `ImportExportService`, `ConflictResolver`, `ColorPalette`
+- Schema migration skeleton
+- Chrome MV3 manifest
+- X.com selector config v1
+- ADRs 001–003
+- Forgejo Actions CI/CD pipeline
