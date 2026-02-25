@@ -205,6 +205,7 @@ export class InjectionPipeline {
         anchor,
         tags,
         this.displayMode === 'full' ? 'pills' : this.displayMode,
+        username,
       );
     }
 

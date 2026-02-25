@@ -66,3 +66,31 @@ Version scheme: [Semantic Versioning](https://semver.org/).
   - Duplicate-init guard
 - ADR-005: Platform adapter design decisions
 - Unit tests: SelectorEngine (15), UserDetector (9), InjectionManager (11), NavigationObserver (7)
+
+### Added (Phase 3 — Interactive UI)
+- `HoverTrigger` — event-delegation hover listener shows 🏷️ icon on username hover
+  - Stamped with `data-username` for callback identification
+  - Click on icon → `onAddTag` callback
+  - Click on existing pill → `onEditTag` callback
+  - Deduplication (one icon at a time), auto-hide on mouse-leave
+- `TagEditorPopover` — full inline tag editor in Shadow DOM
+  - Add mode: empty form, saves via `tags:create` IPC
+  - Edit mode: pre-filled form with delete button, saves via `tags:update` IPC
+  - 16-swatch colour palette grid with selection indicator
+  - Tag name autocomplete from all existing tag names
+  - Optional notes field (toggle, 500-char limit with counter)
+  - Existing user tags shown as mini pills (click to switch to edit mode)
+  - Keyboard shortcuts: Enter to save, Escape to close / close autocomplete
+  - Viewport-aware positioning (flips above anchor near screen bottom)
+  - Singleton — opening a new popover closes the previous
+- Popup dashboard (`src/ui/popup/`) — full management UI
+  - Home: search bar (username + tag name filter), tagged user list with pills, empty state
+  - Import: drag-and-drop / file browse / paste, preview (stats + checksum badge), conflict strategy radio, apply
+  - Export: JSON download, compact XTAG copy-to-clipboard, per-format size info
+  - Settings: display mode, theme, extended palette, hover-to-edit; auto-saved on change
+  - Full CSS theming: dark/light with CSS custom properties, respects OS preference
+  - Broadcasts `settings:push` to open X.com tabs after settings change
+- `InjectionManager` updated to stamp `data-username` and `data-color-index` on pills
+- Content script entry point wires HoverTrigger + TagEditorPopover into the pipeline
+- ADR-005 preserved; no new architectural decisions needed (follows established patterns)
+- Unit tests: TagEditorPopover (9), HoverTrigger (8)

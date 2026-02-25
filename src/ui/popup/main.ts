@@ -1,31 +1,472 @@
 /**
  * @file popup/main.ts
- * @layer UI / Popup Entry Point
- * @description Extension popup. Stub for Phase 1.
- * Full Svelte/Preact popup UI: Phase 4.
+ * @layer UI / Popup
+ * @description Extension popup — tag management dashboard.
+ *
+ * Views:
+ *   - "home":   Search bar, tag cloud, tagged user list, stats
+ *   - "import": File/paste import with preview
+ *   - "export": Export options + copy/download
+ *   - "settings": Display mode, theme, extended palette toggle
+ *
+ * All data fetched from background via typed message channels.
+ * Vanilla TypeScript — no framework. DOM manipulation is minimal and deliberate.
  */
 
 import { sendMessage } from '@shared/messages';
+import { getColor, getBasePalette } from '@core/services/color-palette';
+import { DEFAULT_SETTINGS } from '@core/model/entities';
+import type { ExtensionSettings } from '@core/model/entities';
+import type {
+  QueryTagsResponse, GetSettingsResponse,
+  ExportAllResponse, ImportPreviewResponse,
+  PingResponse,
+} from '@shared/messages';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+interface AppState {
+  view: 'home' | 'import' | 'export' | 'settings';
+  settings: ExtensionSettings;
+  searchQuery: string;
+  version: string;
+  schemaVersion: number;
+}
+
+const state: AppState = {
+  view: 'home',
+  settings: DEFAULT_SETTINGS,
+  searchQuery: '',
+  version: '?',
+  schemaVersion: 0,
+};
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
-  const result = await sendMessage<{ version: string; schemaVersion: number }>({
-    channel: 'extension:ping',
-    payload: {},
-  });
+  // Ping background for version info
+  const ping = await sendMessage<PingResponse>({ channel: 'extension:ping', payload: {} });
+  if (ping.ok && ping.data) {
+    state.version = ping.data.version;
+    state.schemaVersion = ping.data.schemaVersion;
+  }
 
-  const app = document.getElementById('app');
-  if (!app) return;
+  // Load settings
+  const settingsRes = await sendMessage<GetSettingsResponse>({ channel: 'settings:get', payload: {} });
+  if (settingsRes.ok && settingsRes.data) {
+    state.settings = settingsRes.data;
+  }
 
-  if (result.ok && result.data) {
-    app.innerHTML = `
-      <div style="padding: 1rem;">
-        <strong>XTagger</strong> v${result.data.version}<br/>
-        <small>Schema: v${result.data.schemaVersion} · Popup UI coming in Phase 4</small>
-      </div>
-    `;
-  } else {
-    app.innerHTML = '<div style="padding: 1rem; color: #c00;">Background not available</div>';
+  applyTheme(state.settings.theme);
+  renderView('home');
+  bindNav();
+}
+
+// ─── Theme ────────────────────────────────────────────────────────────────────
+
+function applyTheme(theme: 'auto' | 'light' | 'dark'): void {
+  const root = document.documentElement;
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = theme === 'dark' || (theme === 'auto' && prefersDark);
+  root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+}
+
+// ─── Navigation ───────────────────────────────────────────────────────────────
+
+function bindNav(): void {
+  document.getElementById('nav-home')?.addEventListener('click', () => renderView('home'));
+  document.getElementById('nav-import')?.addEventListener('click', () => renderView('import'));
+  document.getElementById('nav-export')?.addEventListener('click', () => renderView('export'));
+  document.getElementById('nav-settings')?.addEventListener('click', () => renderView('settings'));
+}
+
+function setActiveNav(view: AppState['view']): void {
+  document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+  document.getElementById(`nav-${view}`)?.classList.add('active');
+}
+
+function renderView(view: AppState['view']): void {
+  state.view = view;
+  setActiveNav(view);
+  const main = document.getElementById('main')!;
+  main.innerHTML = '';
+
+  switch (view) {
+    case 'home':     renderHome(main); break;
+    case 'import':   renderImport(main); break;
+    case 'export':   renderExport(main); break;
+    case 'settings': renderSettings(main); break;
   }
 }
+
+// ─── Home view ────────────────────────────────────────────────────────────────
+
+async function renderHome(container: HTMLElement): Promise<void> {
+  container.innerHTML = `
+    <div class="search-wrap">
+      <input type="search" id="search" placeholder="Search users or tags…" autocomplete="off" />
+    </div>
+    <div id="results" class="results">
+      <div class="loading">Loading…</div>
+    </div>
+  `;
+
+  document.getElementById('search')?.addEventListener('input', (e) => {
+    state.searchQuery = (e.target as HTMLInputElement).value.trim();
+    loadResults();
+  });
+
+  await loadResults();
+}
+
+async function loadResults(): Promise<void> {
+  const resultsEl = document.getElementById('results');
+  if (!resultsEl) return;
+
+  const res = await sendMessage<QueryTagsResponse>({
+    channel: 'tags:query',
+    payload: {
+      usernameContains: state.searchQuery || undefined,
+      tagNameContains:  state.searchQuery || undefined,
+      limit: 50,
+    },
+  });
+
+  if (!res.ok || !res.data) {
+    resultsEl.innerHTML = '<div class="empty">Could not load tags. Is XTagger active?</div>';
+    return;
+  }
+
+  const { users, totalCount } = res.data;
+
+  if (users.length === 0) {
+    resultsEl.innerHTML = state.searchQuery
+      ? `<div class="empty">No results for "<strong>${escHtml(state.searchQuery)}</strong>"</div>`
+      : `<div class="empty">
+           <div class="empty-icon">🏷️</div>
+           <div>No tagged users yet.</div>
+           <div class="empty-sub">Hover over a username on X.com and click 🏷️ to add a tag.</div>
+         </div>`;
+    return;
+  }
+
+  const totalLabel = totalCount > 50
+    ? `<div class="count-label">Showing 50 of ${totalCount} users</div>`
+    : `<div class="count-label">${totalCount} tagged user${totalCount !== 1 ? 's' : ''}</div>`;
+
+  const userHTML = users.map(({ user, tags }) => {
+    const pillsHTML = tags.map(t => {
+      const c = getColor(t.colorIndex);
+      return `<span class="tag-pill" style="background:${c.hex};color:${c.textColor};" title="${escHtml(t.notes ?? '')}">${escHtml(t.name)}</span>`;
+    }).join('');
+
+    return `
+      <div class="user-row" data-username="${escHtml(user.username)}">
+        <div class="user-info">
+          <span class="username">@${escHtml(user.username)}</span>
+          ${user.displayName ? `<span class="display-name">${escHtml(user.displayName)}</span>` : ''}
+        </div>
+        <div class="user-tags">${pillsHTML}</div>
+      </div>
+    `;
+  }).join('');
+
+  resultsEl.innerHTML = totalLabel + `<div class="user-list">${userHTML}</div>`;
+}
+
+// ─── Import view ──────────────────────────────────────────────────────────────
+
+function renderImport(container: HTMLElement): void {
+  container.innerHTML = `
+    <div class="section-title">Import Tags</div>
+    <p class="hint">Paste an XTAG export string, upload a .xtagger.json file, or drag &amp; drop below.</p>
+
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-icon">📂</div>
+      <div>Drop file here or <label for="file-input" class="file-label">browse</label></div>
+      <input type="file" id="file-input" accept=".json,.xtagger.json" style="display:none" />
+    </div>
+
+    <div class="or-divider"><span>or paste</span></div>
+
+    <textarea id="paste-input" placeholder="Paste XTAG: export string or JSON…" rows="4"></textarea>
+
+    <div id="import-preview"></div>
+
+    <div class="action-row">
+      <button class="btn-secondary" id="btn-preview">Preview</button>
+      <button class="btn-primary" id="btn-import" disabled>Import</button>
+    </div>
+  `;
+
+  let pendingManifest: ImportPreviewResponse['manifest'] | null = null;
+
+  const fileInput = document.getElementById('file-input') as HTMLInputElement;
+  const pasteInput = document.getElementById('paste-input') as HTMLTextAreaElement;
+  const previewEl = document.getElementById('import-preview')!;
+  const importBtn = document.getElementById('btn-import') as HTMLButtonElement;
+
+  // File input
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    pasteInput.value = await file.text();
+  });
+
+  // Drop zone
+  const dropZone = document.getElementById('drop-zone')!;
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer?.files[0];
+    if (file) pasteInput.value = await file.text();
+  });
+  dropZone.addEventListener('click', () => fileInput.click());
+
+  // Preview
+  document.getElementById('btn-preview')?.addEventListener('click', async () => {
+    const raw = pasteInput.value.trim();
+    if (!raw) return;
+
+    previewEl.innerHTML = '<div class="loading">Parsing…</div>';
+    importBtn.disabled = true;
+
+    const res = await sendMessage<ImportPreviewResponse>({
+      channel: 'import:preview',
+      payload: { raw },
+    });
+
+    if (!res.ok || !res.data) {
+      previewEl.innerHTML = `<div class="error-box">Invalid format: ${escHtml(String(res.error?.message ?? 'unknown error'))}</div>`;
+      return;
+    }
+
+    const p = res.data;
+    pendingManifest = p.manifest;
+    importBtn.disabled = false;
+
+    const checksumBadge = p.checksumValid
+      ? '<span class="badge badge-ok">✓ Checksum valid</span>'
+      : '<span class="badge badge-warn">⚠ Checksum mismatch</span>';
+
+    previewEl.innerHTML = `
+      <div class="preview-box">
+        <div class="preview-row"><span>Users affected</span><strong>${p.usersAffected}</strong></div>
+        <div class="preview-row"><span>Tags to add</span><strong>${p.tagsToAdd}</strong></div>
+        <div class="preview-row"><span>Conflicts</span><strong>${p.conflicts}</strong></div>
+        <div class="preview-row"><span>Integrity</span>${checksumBadge}</div>
+        ${p.conflicts > 0 ? `
+          <div class="conflict-opts">
+            <label class="radio-label"><input type="radio" name="conflict" value="keep-mine" checked /> Keep mine</label>
+            <label class="radio-label"><input type="radio" name="conflict" value="keep-theirs" /> Keep theirs</label>
+            <label class="radio-label"><input type="radio" name="conflict" value="merge-both" /> Keep both</label>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  });
+
+  // Import
+  importBtn.addEventListener('click', async () => {
+    if (!pendingManifest) return;
+    importBtn.disabled = true;
+    importBtn.textContent = 'Importing…';
+
+    const strategy = (document.querySelector('input[name="conflict"]:checked') as HTMLInputElement | null)
+      ?.value ?? 'keep-mine';
+
+    const res = await sendMessage({
+      channel: 'import:apply',
+      payload: {
+        manifest: pendingManifest,
+        options: { conflictStrategy: strategy, filterUsernames: [], filterTagNames: [] },
+      },
+    });
+
+    if (res.ok) {
+      previewEl.innerHTML = '<div class="success-box">✓ Import complete! Reload X.com to see updated tags.</div>';
+      importBtn.textContent = 'Done';
+    } else {
+      previewEl.innerHTML = `<div class="error-box">Import failed: ${escHtml(String(res.error?.message))}</div>`;
+      importBtn.disabled = false;
+      importBtn.textContent = 'Import';
+    }
+  });
+}
+
+// ─── Export view ──────────────────────────────────────────────────────────────
+
+function renderExport(container: HTMLElement): void {
+  container.innerHTML = `
+    <div class="section-title">Export Tags</div>
+    <p class="hint">Export all your tags to share or back up. The XTAG: compact format fits in a tweet.</p>
+
+    <div id="export-result"></div>
+    <div class="action-row">
+      <button class="btn-primary" id="btn-export">Export all</button>
+    </div>
+  `;
+
+  document.getElementById('btn-export')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-export') as HTMLButtonElement;
+    const resultEl = document.getElementById('export-result')!;
+    btn.disabled = true;
+    btn.textContent = 'Exporting…';
+
+    const res = await sendMessage<ExportAllResponse>({
+      channel: 'export:all',
+      payload: {},
+    });
+
+    btn.disabled = false;
+    btn.textContent = 'Export all';
+
+    if (!res.ok || !res.data) {
+      resultEl.innerHTML = '<div class="error-box">Export failed.</div>';
+      return;
+    }
+
+    const { json, compact, userCount, tagCount } = res.data;
+
+    resultEl.innerHTML = `
+      <div class="preview-box">
+        <div class="preview-row"><span>Users</span><strong>${userCount}</strong></div>
+        <div class="preview-row"><span>Tags</span><strong>${tagCount}</strong></div>
+      </div>
+
+      <div class="export-section">
+        <label class="export-label">JSON file <span class="hint-inline">(full, for backup)</span></label>
+        <div class="export-actions">
+          <button class="btn-secondary" id="btn-dl-json">⬇ Download</button>
+          <button class="btn-secondary" id="btn-copy-json">⧉ Copy</button>
+        </div>
+      </div>
+
+      <div class="export-section">
+        <label class="export-label">XTAG: compact <span class="hint-inline">(share in a DM/tweet)</span></label>
+        <textarea class="compact-output" readonly rows="3">${escHtml(compact)}</textarea>
+        <button class="btn-secondary" id="btn-copy-compact">⧉ Copy XTAG</button>
+      </div>
+    `;
+
+    document.getElementById('btn-dl-json')?.addEventListener('click', () => {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `xtagger-export-${new Date().toISOString().slice(0, 10)}.xtagger.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('btn-copy-json')?.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(json);
+      flashBtn('btn-copy-json', '✓ Copied');
+    });
+
+    document.getElementById('btn-copy-compact')?.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(compact);
+      flashBtn('btn-copy-compact', '✓ Copied');
+    });
+  });
+}
+
+// ─── Settings view ────────────────────────────────────────────────────────────
+
+function renderSettings(container: HTMLElement): void {
+  const s = state.settings;
+
+  container.innerHTML = `
+    <div class="section-title">Settings</div>
+
+    <div class="setting-group">
+      <label class="setting-label">Display mode</label>
+      <div class="radio-group">
+        <label class="radio-label"><input type="radio" name="display" value="compact" ${s.displayMode === 'compact' ? 'checked' : ''} /> Compact dots</label>
+        <label class="radio-label"><input type="radio" name="display" value="pills"   ${s.displayMode === 'pills'   ? 'checked' : ''} /> Text pills</label>
+        <label class="radio-label"><input type="radio" name="display" value="hidden"  ${s.displayMode === 'hidden'  ? 'checked' : ''} /> Hidden (pause)</label>
+      </div>
+    </div>
+
+    <div class="setting-group">
+      <label class="setting-label">Theme</label>
+      <div class="radio-group">
+        <label class="radio-label"><input type="radio" name="theme" value="auto"  ${s.theme === 'auto'  ? 'checked' : ''} /> Auto</label>
+        <label class="radio-label"><input type="radio" name="theme" value="dark"  ${s.theme === 'dark'  ? 'checked' : ''} /> Dark</label>
+        <label class="radio-label"><input type="radio" name="theme" value="light" ${s.theme === 'light' ? 'checked' : ''} /> Light</label>
+      </div>
+    </div>
+
+    <div class="setting-group">
+      <label class="toggle-label">
+        <input type="checkbox" id="toggle-extended" ${s.extendedPalette ? 'checked' : ''} />
+        Extended colour palette (32 colours)
+      </label>
+    </div>
+
+    <div class="setting-group">
+      <label class="toggle-label">
+        <input type="checkbox" id="toggle-hover-edit" ${s.hoverToEdit ? 'checked' : ''} />
+        Click pills to edit tags
+      </label>
+    </div>
+
+    <div id="settings-status" class="settings-status"></div>
+
+    <div class="version-info">
+      v${escHtml(state.version)} · schema v${state.schemaVersion}
+    </div>
+  `;
+
+  const autosave = async (): Promise<void> => {
+    const displayMode = (document.querySelector('input[name="display"]:checked') as HTMLInputElement | null)?.value as ExtensionSettings['displayMode'] ?? 'compact';
+    const theme       = (document.querySelector('input[name="theme"]:checked') as HTMLInputElement | null)?.value as ExtensionSettings['theme'] ?? 'auto';
+    const extPalette  = (document.getElementById('toggle-extended') as HTMLInputElement).checked;
+    const hoverEdit   = (document.getElementById('toggle-hover-edit') as HTMLInputElement).checked;
+
+    state.settings = { ...state.settings, displayMode, theme, extendedPalette: extPalette, hoverToEdit: hoverEdit };
+    applyTheme(theme);
+
+    await sendMessage({ channel: 'settings:save', payload: state.settings });
+
+    // Broadcast to any open X.com tabs
+    const tabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] });
+    for (const tab of tabs) {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, {
+          channel: 'settings:push',
+          payload: { displayMode, theme },
+        }).catch(() => {}); // Tab may not have content script
+      }
+    }
+
+    const status = document.getElementById('settings-status')!;
+    status.textContent = '✓ Saved';
+    setTimeout(() => { status.textContent = ''; }, 1500);
+  };
+
+  container.querySelectorAll('input').forEach(input => {
+    input.addEventListener('change', autosave);
+  });
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function flashBtn(id: string, label: string): void {
+  const btn = document.getElementById(id) as HTMLButtonElement | null;
+  if (!btn) return;
+  const orig = btn.textContent ?? '';
+  btn.textContent = label;
+  btn.disabled = true;
+  setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1800);
+}
+
+// ─── Run ──────────────────────────────────────────────────────────────────────
 
 init().catch(console.error);

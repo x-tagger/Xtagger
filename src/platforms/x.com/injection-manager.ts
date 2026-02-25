@@ -65,6 +65,7 @@ export class InjectionManager {
     anchor: Element,
     tags: ReadonlyArray<Tag>,
     displayMode: 'compact' | 'pills' | 'full' | 'hidden' = 'compact',
+    username?: string,
   ): void {
     if (displayMode === 'hidden') {
       this.remove(anchor);
@@ -79,11 +80,9 @@ export class InjectionManager {
     const existingHost = this.getExistingHost(anchor);
 
     if (existingHost) {
-      // Update existing injection
-      this.renderTags(existingHost, tags, displayMode);
+      this.renderTags(existingHost, tags, displayMode, username);
     } else {
-      // Create new injection
-      this.createInjection(anchor, tags, displayMode);
+      this.createInjection(anchor, tags, displayMode, username);
     }
   }
 
@@ -131,6 +130,7 @@ export class InjectionManager {
     anchor: Element,
     tags: ReadonlyArray<Tag>,
     displayMode: 'compact' | 'pills' | 'full',
+    username?: string,
   ): void {
     const hostId = `xt-${++this.hostIdCounter}`;
 
@@ -152,7 +152,7 @@ export class InjectionManager {
     container.className = 'xt-container';
     shadow.appendChild(container);
 
-    this.renderTagsInto(container, tags, displayMode);
+    this.renderTagsInto(container, tags, displayMode, username);
 
     // Mark the anchor as injected
     anchor.setAttribute(INJECTED_ATTR, hostId);
@@ -170,6 +170,7 @@ export class InjectionManager {
     host: HTMLElement,
     tags: ReadonlyArray<Tag>,
     displayMode: 'compact' | 'pills' | 'full',
+    username?: string,
   ): void {
     const shadow = host.shadowRoot;
     if (!shadow) return;
@@ -179,13 +180,14 @@ export class InjectionManager {
 
     // Clear and re-render
     container.innerHTML = '';
-    this.renderTagsInto(container as HTMLElement, tags, displayMode);
+    this.renderTagsInto(container as HTMLElement, tags, displayMode, username);
   }
 
   private renderTagsInto(
     container: HTMLElement,
     tags: ReadonlyArray<Tag>,
     displayMode: 'compact' | 'pills' | 'full',
+    username?: string,
   ): void {
     for (const tag of tags) {
       const color = getColor(tag.colorIndex);
@@ -193,6 +195,8 @@ export class InjectionManager {
       pill.className = PILL_CLASS;
       pill.dataset['tagId'] = tag.id;
       pill.dataset['tagName'] = tag.name;
+      pill.dataset['colorIndex'] = String(tag.colorIndex);
+      if (username) pill.dataset['username'] = username;
 
       if (displayMode === 'compact') {
         // Coloured dot only — tag name revealed on hover via title

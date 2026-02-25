@@ -1,47 +1,46 @@
 /**
  * @file content/index.ts
  * @layer UI / Content Script Entry Point
- * @description Injected into X.com pages. Bootstraps the injection pipeline.
+ * @description Injected into X.com pages. Bootstraps the full injection pipeline
+ * including the tag editor popover and hover trigger.
  *
- * BUNDLE SIZE BUDGET: < 50KB total for this entry point + all its imports.
- * Every import here is weighted carefully.
+ * BUNDLE SIZE BUDGET: < 50KB total.
  *
  * Boot sequence:
- *   1. Check the page is X.com (exit silently if not)
- *   2. Load settings from background
- *   3. Load selector config (bundled JSON)
- *   4. Instantiate XPlatformAdapter + InjectionPipeline
- *   5. pipeline.start() — begins observing DOM + navigation
- *
- * The pipeline handles everything from here: tag lookups, injection, updates.
+ *   1. Guard against duplicate init
+ *   2. Check hostname is X.com / Twitter
+ *   3. Load settings from background
+ *   4. Load selector config (bundled JSON via chrome.runtime.getURL)
+ *   5. Instantiate XPlatformAdapter → InjectionPipeline → HoverTrigger
+ *   6. Start pipeline + attach hover trigger
  */
 
-import { EventBus }          from '@core/events/event-bus';
-import { ConsoleLogger }     from '@shared/logger';
-import { sendMessage }       from '@shared/messages';
-import { XPlatformAdapter }  from '@platforms/x.com/x-platform-adapter';
-import { InjectionPipeline } from '@platforms/x.com/injection-pipeline';
-import { DEFAULT_SETTINGS }  from '@core/model/entities';
+import { EventBus }           from '@core/events/event-bus';
+import { ConsoleLogger }      from '@shared/logger';
+import { sendMessage }        from '@shared/messages';
+import { XPlatformAdapter }   from '@platforms/x.com/x-platform-adapter';
+import { InjectionPipeline }  from '@platforms/x.com/injection-pipeline';
+import { HoverTrigger }       from './hover-trigger';
+import { TagEditorPopover }   from './tag-editor-popover';
+import { DEFAULT_SETTINGS }   from '@core/model/entities';
 import type { ExtensionSettings } from '@core/model/entities';
+import type { Tag, UserIdentifier } from '@core/model/entities';
 import type { GetSettingsResponse } from '@shared/messages';
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
 async function boot(): Promise<void> {
-  const logger = new ConsoleLogger('Content', 'warn'); // warn in production, debug in dev
+  const logger = new ConsoleLogger('Content', 'warn');
 
-  // Exit immediately if not on X.com / Twitter
+  // Only run on X.com / Twitter
   const host = window.location.hostname;
   if (!host.includes('x.com') && !host.includes('twitter.com')) return;
 
-  // Deduplicate: don't initialise twice if the content script fires twice
-  if (document.documentElement.hasAttribute('data-xtagger-active')) {
-    logger.warn('Content script already active — skipping duplicate init');
-    return;
-  }
+  // Prevent double-init (content script can be injected multiple times)
+  if (document.documentElement.hasAttribute('data-xtagger-active')) return;
   document.documentElement.setAttribute('data-xtagger-active', '1');
 
-  // Load settings from background (use defaults if background isn't ready yet)
+  // Load settings; fall back to defaults if background isn't ready
   let settings: ExtensionSettings = DEFAULT_SETTINGS;
   const settingsResult = await sendMessage<GetSettingsResponse>({
     channel: 'settings:get',
@@ -52,39 +51,74 @@ async function boot(): Promise<void> {
   }
 
   if (settings.displayMode === 'hidden') {
-    logger.info('Display mode is hidden — injection disabled');
+    logger.info('Display mode hidden — injection disabled');
     return;
   }
 
-  // Load selector config — bundled with the extension
-  let selectorConfig: object;
+  // Load bundled selector config
+  let selectorConfig: object = { selectorVersion: 0, lastVerified: '', platform: 'x.com', selectors: {} };
   try {
-    const configUrl = chrome.runtime.getURL('selector-configs/x.com.json');
-    const res = await fetch(configUrl);
+    const res = await fetch(chrome.runtime.getURL('selector-configs/x.com.json'));
     selectorConfig = await res.json() as object;
   } catch (e) {
     logger.error('Failed to load selector config', { error: String(e) });
-    // Fall back to an empty config — injection won't work but won't crash
-    selectorConfig = { selectorVersion: 0, lastVerified: '', platform: 'x.com', selectors: {} };
   }
 
-  // Wire up the local EventBus (content script context — separate from background)
+  // Wire up the content-script-local EventBus
   const bus = new EventBus();
 
-  // Instantiate platform adapter and injection pipeline
+  // Platform adapter + injection pipeline
   const platform = new XPlatformAdapter(bus, logger, selectorConfig);
   const pipeline  = new InjectionPipeline(platform, bus, logger);
 
-  // Start the pipeline — this begins observing DOM mutations
+  // Tag editor popover (singleton — one open at a time)
+  const popover = new TagEditorPopover(logger);
+
+  // Hover trigger — shows 🏷️ icon on username hover
+  const hoverTrigger = new HoverTrigger(logger);
+
+  const onTagSaved = (userId: UserIdentifier, tag: Tag): void => {
+    // Emit to local bus so pipeline invalidates cache and re-injects
+    bus.emit('tag:created', { tag, userId });
+  };
+
+  const onTagDeleted = (userId: UserIdentifier, tagId: string): void => {
+    bus.emit('tag:deleted', { tagId, userId });
+  };
+
+  hoverTrigger.attach({
+    onAddTag: (userId: UserIdentifier, anchor: Element) => {
+      popover.open({
+        mode: 'add',
+        userId,
+        anchor,
+        onSaved: (tag) => onTagSaved(userId, tag),
+        onDeleted: (tagId) => onTagDeleted(userId, tagId),
+        onClosed: () => {},
+      });
+    },
+    onEditTag: (userId: UserIdentifier, tag: Tag, anchor: Element) => {
+      popover.open({
+        mode: 'edit',
+        userId,
+        anchor,
+        existingTag: tag,
+        onSaved: (savedTag) => onTagSaved(userId, savedTag),
+        onDeleted: (tagId) => onTagDeleted(userId, tagId),
+        onClosed: () => {},
+      });
+    },
+  });
+
+  // Start the injection pipeline
   await pipeline.start(settings);
 
-  logger.info('XTagger content script active', {
+  logger.info('XTagger active', {
     platform: platform.platformId,
     displayMode: settings.displayMode,
   });
 
-  // Listen for settings changes broadcast from the popup (via custom event for now;
-  // full chrome.runtime push messaging in Phase 4)
+  // Listen for settings-changed broadcasts from the popup
   window.addEventListener('xtagger:settings-changed', (e) => {
     const detail = (e as CustomEvent<Partial<ExtensionSettings>>).detail;
     if (detail.displayMode) {
@@ -93,10 +127,8 @@ async function boot(): Promise<void> {
   });
 }
 
-// Run boot — catch any unexpected errors to prevent crashing X.com
 boot().catch((e: unknown) => {
-  console.error('[XTagger] Content script boot failed:', e);
-  // Remove the active flag so a page reload can try again
+  console.error('[XTagger] Boot failed:', e);
   document.documentElement.removeAttribute('data-xtagger-active');
 });
 
