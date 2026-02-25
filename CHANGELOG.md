@@ -124,3 +124,55 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 - Extension icons generated (16, 32, 48, 128px PNG) from Python Pillow
 - Vite build config updated with `onboarding` entry point
 - Unit tests: Announcer (5), ContextMenuManager (6)
+
+### Added (Phase 5 — E2E Tests, CI & Packaging)
+- Playwright E2E test suite (`tests/e2e/`)
+  - `fixtures.ts` — extension loading fixture using `launchPersistentContext`
+  - `global-setup.ts` — auto-builds extension before tests
+  - `popup.test.ts` — 10 tests: popup loads, nav, settings, export, import error
+  - `tag-creation.test.ts` — 3 tests: hover icon, editor opens, full create flow
+  - `import-export.test.ts` — 5 tests: export, clipboard, preview, apply, error
+  - `mock-feed.html` — X.com DOM mock for content script testing (no auth needed)
+- `playwright.config.ts` — chromium-only, global setup, CI-aware reporters
+- `scripts/verify-selectors.js` — daily X.com selector health check
+  - Opens X.com explore page in headless Chromium
+  - Tests each strategy for each selector key
+  - Writes `selector-report/report.json` + screenshots
+  - Referenced by `.forgejo/workflows/selector-check.yml`
+- `scripts/package-extension.ts` — production build + zip + SHA-256 checksum
+  - Validates all required files are present
+  - Enforces bundle size budgets before packaging
+  - Outputs `xtagger-v<version>.zip` + `.sha256` file
+- CI workflow updated (`.forgejo/workflows/ci.yml`)
+  - Split into 4 jobs: `test` → `build` → `e2e` → `release`
+  - `build` uploads dist/ artifact (shared to E2E and release jobs)
+  - `e2e` downloads dist/, installs Playwright, runs full suite
+  - `release` job fires on `v*` tags, packages and attaches zip + checksum
+  - Bundle size check improved: per-file budgets with pass/fail output
+- `package.json` scripts: `test:e2e:headed`, `test:e2e:ui`, `package`, `verify-selectors`
+- `README.md` — complete documentation
+  - Installation (from source + from zip)
+  - Usage guide (tagging, editing, sharing, popup)
+  - Display mode table
+  - Export format explanations
+  - Development commands reference
+  - Architecture overview + contribution guide
+  - Privacy statement
+
+### Added (Phase 5 — E2E Tests, CI/CD & Packaging)
+- E2E test fixtures rewritten with `mockFeedPage` fixture
+  - Uses `page.route()` to serve mock HTML at `https://x.com/mock-feed`
+  - Content script runs normally (URL matches manifest's `x.com/*`)
+  - Replaces brittle `file://` approach that couldn't trigger the content script
+- `tag-creation.test.ts` — 6 scenarios: hover shows icon, click opens popover,
+  username shown in title, Escape closes, 16 swatches, complete create+verify-in-popup flow
+- `popup.test.ts` — 10 scenarios: load, empty state, search filter, all nav views,
+  settings save, settings persist after reopen, export, import error, theme toggle
+- `import-export.test.ts` — 7 scenarios: export generates output, compact format,
+  copy confirms, import preview, import apply, imported user in list, roundtrip
+- `verify-selectors.js` completed — opens x.com/explore, tests all selectors,
+  writes JSON report + failure screenshots, auto-updates `lastVerified` on success
+- `package-extension.ts` fixed — sync JSON read, proper checksum computation
+- `vitest.config.ts` updated — coverage now includes `src/platforms/**` + `src/ui/**`
+- `package.json` — added `tsx` devDependency (required for package script)
+- `README.md` — comprehensive: install, usage, architecture, privacy, contributing, roadmap

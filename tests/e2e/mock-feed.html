@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  mock-feed.html — Simulates X.com's feed DOM structure for E2E testing.
+  The content script is injected into pages matching x.com/* but since
+  this is a file:// URL, we manually dispatch the boot signal.
+
+  The DOM structure mirrors X.com's actual markup so UserDetector
+  and SelectorEngine work against real selectors.
+-->
+<head>
+  <meta charset="UTF-8" />
+  <title>Mock X.com Feed</title>
+  <style>
+    body { font-family: system-ui; background: #15202b; color: #e7e9ea; padding: 20px; }
+    .tweet { background: #1e2732; border-radius: 8px; padding: 16px; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <main role="main" id="primaryColumn" data-testid="primaryColumn">
+
+    <!-- Tweet 1: @alice_dev -->
+    <div data-testid="cellInnerDiv">
+      <article role="article">
+        <div data-testid="User-Name">
+          <a href="https://x.com/alice_dev" role="link">
+            <span>Alice Developer</span>
+          </a>
+          <a href="https://x.com/alice_dev" role="link">
+            <span dir="ltr"><span>@alice_dev</span></span>
+          </a>
+        </div>
+        <div class="tweet">This is a mock tweet from Alice about coding.</div>
+      </article>
+    </div>
+
+    <!-- Tweet 2: @bobsmith -->
+    <div data-testid="cellInnerDiv">
+      <article role="article">
+        <div data-testid="User-Name">
+          <a href="https://x.com/bobsmith" role="link">
+            <span>Bob Smith</span>
+          </a>
+          <a href="https://x.com/bobsmith" role="link">
+            <span dir="ltr"><span>@bobsmith</span></span>
+          </a>
+        </div>
+        <div class="tweet">This is a mock tweet from Bob about technology.</div>
+      </article>
+    </div>
+
+    <!-- Tweet 3: @carol_writes -->
+    <div data-testid="cellInnerDiv">
+      <article role="article">
+        <div data-testid="User-Name">
+          <a href="https://x.com/carol_writes" role="link">
+            <span>Carol Writes</span>
+          </a>
+          <a href="https://x.com/carol_writes" role="link">
+            <span dir="ltr"><span>@carol_writes</span></span>
+          </a>
+        </div>
+        <div class="tweet">This is a mock tweet from Carol about journalism.</div>
+      </article>
+    </div>
+
+  </main>
+
+  <script>
+    // Patch hostname so the content script thinks it's on X.com
+    Object.defineProperty(window.location, 'hostname', {
+      get: () => 'x.com',
+      configurable: true,
+    });
+  </script>
+</body>
+</html>
