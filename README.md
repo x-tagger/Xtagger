@@ -1,6 +1,6 @@
 # XTagger 🏷️
 
-> **Local-first annotation layer for X.com.** Tag any account with custom labels. Your tags, your device, your data.
+> **Local-first annotation layer for X.com.** Tag any account with custom labels. Your tags, your device, your data. Browser-extension to tag users on X.com, edit, curate and share tag collections.
 
 [![CI](https://forgejo.haggis.top/xtagger/xtagger/actions/workflows/ci.yml/badge.svg)](https://forgejo.haggis.top/xtagger/xtagger/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
@@ -34,26 +34,16 @@ pnpm test         # unit tests
 pnpm typecheck    # TypeScript strict check
 pnpm lint         # Biome lint + format check
 pnpm build        # production bundle
-```
-
-## Architecture
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full layered architecture.
-
+Architecture
+See docs/ARCHITECTURE.md for the full layered architecture.
 Key principles:
-- **Hexagonal Architecture** — core domain has zero browser/DOM dependencies
-- **Result types** — no exceptions thrown in core code
-- **Event-driven** — modules communicate via typed EventBus
-- **Local-first** — all data in IndexedDB, never leaves device unless you export
-
-## Sharing Collections
-
-XTagger uses a decentralised sharing model. Export your tag collection to a `.xtagger.json` file and share it however you like — PrivacyBin, a Forgejo gist, an X post, email. Import from a file, clipboard, or URL. No backend required.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). All significant decisions are documented in [docs/adr/](docs/adr/).
-
-## License
-
-AGPL-3.0 — see [LICENSE](LICENSE).
+Hexagonal Architecture — core domain has zero browser/DOM dependencies
+Result types — no exceptions thrown in core code
+Event-driven — modules communicate via typed EventBus
+Local-first — all data in IndexedDB, never leaves device unless you export
+Sharing Collections
+XTagger uses a decentralised sharing model. Export your tag collection to a .xtagger.json file and share it however you like — PrivacyBin, a Forgejo gist, an X post, email. Import from a file, clipboard, or URL. No backend required.
+Contributing
+See CONTRIBUTING.md. All significant decisions are documented in docs/adr/.
+License
+AGPL-3.0 — see LICENSE.
