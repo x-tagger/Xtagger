@@ -50,9 +50,11 @@ const IDX_TAG_DELETED   = 'deletedAt';
 export class IDBAdapter implements StoragePort {
   private db: IDBDatabase | null = null;
   private readonly log: LoggerPort;
+  private readonly dbName: string;
 
-  constructor(logger: LoggerPort) {
-    this.log = logger.child('IDBAdapter');
+  constructor(logger: LoggerPort, dbName = DB_NAME) {
+    this.log    = logger.child('IDBAdapter');
+    this.dbName = dbName;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -60,7 +62,7 @@ export class IDBAdapter implements StoragePort {
   async open(): Promise<Result<void, StorageError>> {
     if (this.db) return ok(undefined);
     return new Promise((resolve) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      const req = indexedDB.open(this.dbName, DB_VERSION);
 
       req.onupgradeneeded = (e) => {
         const db = (e.target as IDBOpenDBRequest).result;
@@ -236,13 +238,20 @@ export class IDBAdapter implements StoragePort {
     const dbr = await this.ensureOpen();
     if (!dbr.ok) return dbr;
     return new Promise((resolve) => {
+      // Use getAll() (not getAllKeys()) — index.getAllKeys() returns primary key (tag id),
+      // not the index key (tag name). We need the name values, so getAll() + map is correct.
       const req = dbr.value
         .transaction(STORE_TAGS, 'readonly')
         .objectStore(STORE_TAGS)
         .index(IDX_TAG_NAME)
-        .getAllKeys();
-      req.onsuccess = () => resolve(ok([...new Set(req.result as string[])].sort()));
-      req.onerror   = () => resolve(err({ type: 'STORAGE_READ_FAILED', message: 'getAllTagNames failed' }));
+        .getAll();
+      req.onsuccess = () => {
+        const names = (req.result as TagRow[])
+          .filter((r) => r.deletedAt === undefined)
+          .map((r) => r.name);
+        resolve(ok([...new Set(names)].sort()));
+      };
+      req.onerror = () => resolve(err({ type: 'STORAGE_READ_FAILED', message: 'getAllTagNames failed' }));
     });
   }
 

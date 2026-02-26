@@ -93,6 +93,21 @@ export interface PaletteColor {
 // ─── Import / Export ──────────────────────────────────────────────────────────
 
 /**
+ * Filter criteria used when building a named collection.
+ * Stored in the manifest so importers know what the collection represents.
+ */
+export interface CollectionCriteria {
+  /** Human name for the collection, e.g. "British Journalists" */
+  readonly name: string;
+  /** Include users who have ANY of these tags (OR logic) */
+  readonly includeAnyTags: ReadonlyArray<string>;
+  /** Additionally, users must have ALL of these tags (AND logic, optional) */
+  readonly includeAllTags: ReadonlyArray<string>;
+  /** Exclude users who have ANY of these tags */
+  readonly excludeTags: ReadonlyArray<string>;
+}
+
+/**
  * The top-level shape of an exported .xtagger.json file.
  * `entries` maps "platform:username" to an array of tags.
  */
@@ -104,6 +119,8 @@ export interface ExportManifest {
   readonly exportedBy?: string;
   /** Optional description of what this collection represents */
   readonly description?: string;
+  /** If this is a filtered collection export, the criteria used */
+  readonly collection?: CollectionCriteria;
   /** Platform this collection was exported from */
   readonly platform: PlatformId;
   /** SHA-256 hex digest of the `entries` field (JSON-serialized, sorted keys) */

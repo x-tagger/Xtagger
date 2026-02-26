@@ -1,7 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="28" fill="#1d9bf0"/>
-  <path d="M28 44 L28 76 L60 108 L100 68 L68 36 L36 36 Z" fill="white" opacity="0.15"/>
-  <path d="M30 42 L30 74 L62 106 L98 70 L66 34 L34 34 Z" fill="none" stroke="white" stroke-width="5" stroke-linejoin="round"/>
-  <circle cx="50" cy="52" r="7" fill="white"/>
-  <text x="64" y="80" text-anchor="middle" font-family="system-ui" font-size="32" font-weight="700" fill="white">🏷</text>
+  <!-- Dark rounded square background -->
+  <rect width="128" height="128" rx="24" fill="#1a1d26"/>
+  <!-- Gold tag shape: rotated square with notch cut, pointing right -->
+  <!-- Tag body -->
+  <path d="M20 20 L20 74 L66 120 Q70 124 74 120 L120 74 Q124 70 120 66 L74 20 Z"
+        fill="#D4A000"/>
+  <!-- Slightly lighter highlight on tag -->
+  <path d="M20 20 L20 54 L54 20 Z" fill="#E8B800" opacity="0.4"/>
+  <!-- Hole in tag -->
+  <circle cx="46" cy="46" r="10" fill="#1a1d26"/>
+  <!-- Subtle inner ring on hole -->
+  <circle cx="46" cy="46" r="10" fill="none" stroke="#C49000" stroke-width="2"/>
 </svg>

@@ -14,7 +14,7 @@
 import type { StoragePort } from '@core/ports/storage.port';
 import type { LoggerPort } from '@core/ports/logger.port';
 import type { TypedEventBus } from '@core/events/event-bus';
-import type { Tag, UserIdentifier, ExportManifest } from '@core/model/entities';
+import type { Tag, UserIdentifier, ExportManifest, CollectionCriteria } from '@core/model/entities';
 import type { ValidationError, StorageError } from '@core/shared/errors';
 import type { ImportOptions } from '@core/model/schemas';
 import type { Result } from '@core/shared/result';
@@ -84,7 +84,6 @@ export class ImportExportService {
     const queryResult = await this.storage.queryTags({
       platform,
       includeDeleted: false,
-      ...(opts.filterTagNames?.length ? { tagNameContains: undefined } : {}),
     });
 
     if (!queryResult.ok) return queryResult;
@@ -115,8 +114,8 @@ export class ImportExportService {
     const manifest = await this.buildManifest({
       platform,
       entries,
-      exportedBy: opts.exportedBy,
-      description: opts.description,
+      ...(opts.exportedBy  ? { exportedBy:  opts.exportedBy  } : {}),
+      ...(opts.description ? { description: opts.description } : {}),
     });
 
     const json = JSON.stringify(manifest, null, 2);
@@ -138,6 +137,86 @@ export class ImportExportService {
       compact,
       userCount: Object.keys(entries).length,
       tagCount,
+    });
+  }
+
+  /**
+   * Export a named collection defined by inclusion/exclusion tag criteria.
+   * includeAnyTags: user must have at least one (OR)
+   * includeAllTags: user must also have all of these (AND, additive)
+   * excludeTags:    user must have none of these (NOT)
+   */
+  async exportCollection(opts: {
+    name: string;
+    description?: string;
+    exportedBy?: string;
+    platform?: string;
+    includeAnyTags: ReadonlyArray<string>;
+    includeAllTags: ReadonlyArray<string>;
+    excludeTags: ReadonlyArray<string>;
+  }): Promise<Result<ExportResult & { collectionName: string }, StorageError | ValidationError>> {
+    const platform = opts.platform ?? PLATFORM_X;
+
+    const queryResult = await this.storage.queryTags({ platform, includeDeleted: false });
+    if (!queryResult.ok) return queryResult;
+
+    const includeAny = new Set(opts.includeAnyTags.map(n => n.toLowerCase()));
+    const includeAll = opts.includeAllTags.map(n => n.toLowerCase());
+    const excludeSet = new Set(opts.excludeTags.map(n => n.toLowerCase()));
+
+    const entries: Record<string, Tag[]> = {};
+    let tagCount = 0;
+
+    for (const { user, tags } of queryResult.value.users) {
+      const tagNames = new Set(tags.map((t: Tag) => t.name.toLowerCase()));
+
+      // Must have at least one includeAny tag
+      if (includeAny.size > 0 && !opts.includeAnyTags.some((n: string) => tagNames.has(n.toLowerCase()))) continue;
+
+      // Must have all includeAll tags
+      if (includeAll.length > 0 && !includeAll.every(n => tagNames.has(n))) continue;
+
+      // Must not have any excluded tag
+      if (opts.excludeTags.some((n: string) => tagNames.has(n.toLowerCase()))) continue;
+
+      if (tags.length > 0) {
+        const key = this.makeEntryKey(user);
+        entries[key] = [...tags];
+        tagCount += tags.length;
+      }
+    }
+
+    const criteria: CollectionCriteria = {
+      name:           opts.name,
+      includeAnyTags: [...opts.includeAnyTags],
+      includeAllTags: [...opts.includeAllTags],
+      excludeTags:    [...opts.excludeTags],
+    };
+
+    const manifest = await this.buildManifest({
+      platform,
+      entries,
+      collection:  criteria,
+      description: opts.description ?? opts.name,
+      ...(opts.exportedBy ? { exportedBy: opts.exportedBy } : {}),
+    });
+
+    const json    = JSON.stringify(manifest, null, 2);
+    const compact = await this.makeCompact(json);
+
+    this.log.info('Collection export completed', {
+      collection: opts.name,
+      userCount: Object.keys(entries).length,
+      tagCount,
+    });
+
+    return ok({
+      manifest,
+      json,
+      compact,
+      userCount: Object.keys(entries).length,
+      tagCount,
+      collectionName: opts.name,
     });
   }
 
@@ -340,16 +419,18 @@ export class ImportExportService {
     entries: Record<string, Tag[]>;
     exportedBy?: string;
     description?: string;
+    collection?: CollectionCriteria;
   }): Promise<ExportManifest> {
     const checksum = await this.computeChecksum(opts.entries);
     return {
       schemaVersion: CURRENT_SCHEMA_VERSION,
-      exportedAt: new Date().toISOString(),
-      exportedBy: opts.exportedBy,
-      description: opts.description,
-      platform: opts.platform,
+      exportedAt:    new Date().toISOString(),
+      platform:      opts.platform,
       checksum,
-      entries: opts.entries,
+      entries:       opts.entries,
+      ...(opts.exportedBy  ? { exportedBy:  opts.exportedBy  } : {}),
+      ...(opts.description ? { description: opts.description } : {}),
+      ...(opts.collection  ? { collection:  opts.collection  } : {}),
     };
   }
 

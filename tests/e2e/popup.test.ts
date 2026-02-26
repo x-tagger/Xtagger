@@ -40,7 +40,7 @@ test.describe('Popup', () => {
   });
 
   test('navigates to export view', async ({ popupPage }) => {
-    await popupPage.click('#nav-export');\
+    await popupPage.click('#nav-export');
     await expect(popupPage.locator('#nav-export')).toHaveClass(/active/);
     await expect(popupPage.locator('#btn-export')).toBeVisible();
     await expect(popupPage.locator('#btn-export')).toHaveText('Export all');

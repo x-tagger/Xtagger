@@ -24,9 +24,11 @@ const makeUser = (username: string): UserIdentifier => ({
   lastSeen: Date.now(),
 });
 
+// Unique DB name per call — prevents any cross-test state leakage
+let _dbSeq = 0;
 async function buildServices() {
   const logger  = new NoopLogger();
-  const storage = new IDBAdapter(logger);
+  const storage = new IDBAdapter(logger, `test_ie_${++_dbSeq}`);
   await storage.open();
   const bus      = new EventBus();
   const resolver = new DefaultConflictResolver();

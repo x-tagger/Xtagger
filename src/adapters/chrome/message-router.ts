@@ -21,7 +21,7 @@ import type { MessageResponse } from '@shared/messages';
 import type {
   GetTagsForUserRequest, CreateTagRequest, UpdateTagRequest,
   DeleteTagRequest, QueryTagsRequest, ImportPreviewRequest,
-  ImportApplyRequest, ExportAllRequest,
+  ImportApplyRequest, ExportAllRequest, ExportCollectionRequest,
 } from '@shared/messages';
 
 import { ok } from '@core/shared/result';
@@ -83,6 +83,7 @@ export class MessageRouter {
       case 'import:preview':         return this.handleImportPreview(payload);
       case 'import:apply':           return this.handleImportApply(payload);
       case 'export:all':             return this.handleExportAll(payload);
+      case 'export:collection':       return this.handleExportCollection(payload);
       case 'settings:get':           return this.handleGetSettings();
       case 'settings:save':          return this.handleSaveSettings(payload);
       default:
@@ -164,6 +165,22 @@ export class MessageRouter {
         compact: result.value.compact,
         userCount: result.value.userCount,
         tagCount: result.value.tagCount,
+      },
+    };
+  }
+
+  private async handleExportCollection(payload: unknown): Promise<MessageResponse> {
+    const opts = payload as ExportCollectionRequest;
+    const result = await this.importExport.exportCollection(opts);
+    if (!result.ok) return { ok: false, error: result.error };
+    return {
+      ok: true,
+      data: {
+        json:           result.value.json,
+        compact:        result.value.compact,
+        userCount:      result.value.userCount,
+        tagCount:       result.value.tagCount,
+        collectionName: result.value.collectionName,
       },
     };
   }

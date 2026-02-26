@@ -1,6 +1,8 @@
 /**
  * @file migration-service.test.ts
  * @description Integration tests for MigrationService.
+ *
+ * Each test uses a unique DB name to prevent state leakage across tests.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -10,12 +12,17 @@ import { MigrationService } from '../../src/adapters/storage/migration-service';
 import { NoopLogger }       from '../../src/shared/logger';
 import { CURRENT_SCHEMA_VERSION } from '../../src/core/shared/constants';
 
+let _dbSeq = 0;
+function freshAdapter(): IDBAdapter {
+  return new IDBAdapter(new NoopLogger(), `test_migrate_${++_dbSeq}`);
+}
+
 describe('MigrationService', () => {
   let storage: IDBAdapter;
   let migrations: MigrationService;
 
   beforeEach(async () => {
-    storage    = new IDBAdapter(new NoopLogger());
+    storage    = freshAdapter();
     await storage.open();
     migrations = new MigrationService(storage, new NoopLogger());
   });

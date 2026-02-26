@@ -27,8 +27,7 @@
     {
       "matches": ["https://x.com/*", "https://twitter.com/*"],
       "js": ["content.js"],
-      "run_at": "document_idle",
-      "type": "module"
+      "run_at": "document_idle"
     }
   ],
   "icons": {
@@ -40,8 +39,6 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "content.js",
-        "chunks/*.js",
         "selector-configs/*.json",
         "src/ui/onboarding/index.html"
       ],

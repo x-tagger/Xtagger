@@ -12,7 +12,6 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "allowImportingTsExtensions": false,
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
@@ -20,11 +19,11 @@
     "outDir": "./dist",
     "baseUrl": ".",
     "paths": {
-      "@core/*": ["src/core/*"],
-      "@adapters/*": ["src/adapters/*"],
+      "@core/*":      ["src/core/*"],
+      "@adapters/*":  ["src/adapters/*"],
       "@platforms/*": ["src/platforms/*"],
-      "@ui/*": ["src/ui/*"],
-      "@shared/*": ["src/shared/*"]
+      "@ui/*":        ["src/ui/*"],
+      "@shared/*":    ["src/shared/*"]
     }
   },
   "include": ["src/**/*", "tests/**/*"],

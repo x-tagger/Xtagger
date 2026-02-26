@@ -1,92 +1,91 @@
 /**
  * @module tag-editor-popover
  * @layer UI / Content
- * @description Inline tag editor popover — rendered in Shadow DOM adjacent to a username.
+ * @description Tag editor popover — opens on hover-icon click.
  *
- * Modes:
- *   - "add":  Empty form for creating a new tag. Shows existing tags for this user below.
- *   - "edit": Pre-filled form for editing/deleting an existing tag.
- *
- * Features:
- *   - Tag name input with real-time autocomplete from all existing tag names
- *   - 16-colour palette grid (4×4) with selection indicator
- *   - Optional notes textarea (max 500 chars, shown/hidden by toggle)
- *   - Existing tags shown as mini pills (click → switch to edit mode)
- *   - Keyboard: Enter to save, Escape to close
- *   - Positioned relative to the anchor, flips up if near viewport bottom
- *   - One popover at a time — opening a new one closes the previous
- *
- * All styles are inline/Shadow DOM — no external CSS dependencies.
- *
- * Dependencies: sendMessage (IPC to background), color-palette
+ * Sections:
+ *   1. Quick-assign — all previously used tag names, one-click assign
+ *   2. New tag — name input + 32-colour palette (2 rows of 16)
+ *   3. User's current tags — edit/delete
  */
 
-import type { Tag, UserIdentifier } from '@core/model/entities';
-import type { LoggerPort } from '@core/ports/logger.port';
 import type {
-  CreateTagRequest, UpdateTagRequest, DeleteTagRequest,
-  CreateTagResponse, UpdateTagResponse, GetAllTagNamesResponse,
+  Tag,
+  UserIdentifier,
+} from '@core/model/entities';
+import type {
+  CreateTagRequest,
+  CreateTagResponse,
+  UpdateTagRequest,
+  UpdateTagResponse,
   GetTagsForUserResponse,
+  GetAllTagNamesResponse,
+  DeleteTagRequest,
+  QueryTagsRequest,
+  QueryTagsResponse,
 } from '@shared/messages';
 
 import { sendMessage }   from '@shared/messages';
-import { getBasePalette, getColor } from '@core/services/color-palette';
-import { announce } from './announcer';
+import { getColor, getExtendedPalette } from '@core/services/color-palette';
+import { announce }      from './announcer';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface PopoverOptions {
+  mode:        'add' | 'edit';
+  userId:      UserIdentifier;
+  anchor:      Element;
+  existingTag?: Tag;
+  onSaved:     (tag: Tag)     => void;
+  onDeleted:   (tagId: string) => void;
+  onClosed:    ()              => void;
+}
 
 // ─── Singleton management ─────────────────────────────────────────────────────
 
 let activePopover: TagEditorPopover | null = null;
-
-export function closeActivePopover(): void {
-  activePopover?.close();
-  activePopover = null;
-}
+function closeActive(): void { activePopover?.close(); activePopover = null; }
 
 // ─── TagEditorPopover ─────────────────────────────────────────────────────────
 
-export type PopoverMode = 'add' | 'edit';
-
-export interface PopoverOptions {
-  mode: PopoverMode;
-  userId: UserIdentifier;
-  anchor: Element;
-  existingTag?: Tag;          // only in edit mode
-  onSaved: (tag: Tag) => void;
-  onDeleted: (tagId: string) => void;
-  onClosed: () => void;
-}
-
 export class TagEditorPopover {
-  private host: HTMLElement | null = null;
-  private shadow: ShadowRoot | null = null;
-  private selectedColorIndex = 0;
-  private allTagNames: string[] = [];
-  private userTags: Tag[] = [];
-  private readonly log: LoggerPort;
+  private host:   HTMLElement  | null = null;
+  private shadow: ShadowRoot   | null = null;
+  private selectedColorIndex          = 0;
+  private allTagNames:  string[]      = [];
+  private allTagColors: Map<string, { hex: string; textColor: string }> = new Map();
+  private userTags:     Tag[]         = [];
 
-  constructor(logger: LoggerPort) {
-    this.log = logger.child('TagEditorPopover');
-  }
-
-  // ── Public API ────────────────────────────────────────────────────────────
+  constructor(private readonly log: { debug: (m:string, d?:object) => void; error: (m:string, d?:object) => void }) {}
 
   async open(opts: PopoverOptions): Promise<void> {
-    // Close any previously open popover
-    closeActivePopover();
+    closeActive();
     activePopover = this;
-
     this.selectedColorIndex = opts.existingTag?.colorIndex ?? 0;
 
-    // Fetch autocomplete data and user's current tags in parallel
-    const [namesResult, tagsResult] = await Promise.all([
+    const [namesResult, tagsResult, queryResult] = await Promise.all([
       sendMessage<GetAllTagNamesResponse>({ channel: 'tags:get-all-names', payload: {} }),
       sendMessage<GetTagsForUserResponse>({
         channel: 'tags:get-for-user',
         payload: { platform: opts.userId.platform, username: opts.userId.username },
       }),
+      sendMessage<QueryTagsResponse>({
+        channel: 'tags:query',
+        payload: { limit: 200 } satisfies QueryTagsRequest,
+      }),
     ]);
     this.allTagNames = namesResult.ok && namesResult.data ? [...namesResult.data] : [];
-    this.userTags    = tagsResult.ok && tagsResult.data   ? [...tagsResult.data]  : [];
+    this.userTags    = tagsResult.ok  && tagsResult.data  ? [...tagsResult.data]  : [];
+    // Build name→color map from most-recently-updated tag with each name
+    this.allTagColors = new Map();
+    if (queryResult.ok && queryResult.data) {
+      for (const { tags } of queryResult.data.users) {
+        for (const t of tags) {
+          const c = getColor(t.colorIndex);
+          this.allTagColors.set(t.name, { hex: c.hex, textColor: c.textColor });
+        }
+      }
+    }
 
     this.render(opts);
     this.position(opts.anchor);
@@ -105,29 +104,23 @@ export class TagEditorPopover {
   private render(opts: PopoverOptions): void {
     this.host = document.createElement('div');
     this.host.setAttribute('data-xtagger-popover', '1');
-    this.host.style.cssText = [
-      'position:absolute',
-      'z-index:2147483640',
-    ].join(';');
-
+    this.host.style.cssText = 'position:absolute;z-index:2147483640;';
     this.shadow = this.host.attachShadow({ mode: 'open' });
     this.shadow.innerHTML = this.buildHTML(opts);
-
     this.bindEvents(opts);
     document.documentElement.appendChild(this.host);
-
-    // Focus the name input
     requestAnimationFrame(() => {
       (this.shadow?.querySelector<HTMLInputElement>('#xt-name'))?.focus();
     });
   }
 
   private buildHTML(opts: PopoverOptions): string {
-    const isEdit = opts.mode === 'edit';
-    const tag = opts.existingTag;
-    const palette = getBasePalette();
+    const isEdit   = opts.mode === 'edit';
+    const tag      = opts.existingTag;
     const username = opts.userId.username;
+    const palette  = getExtendedPalette(); // all 32
 
+    // ── Palette grid: 2 rows × 16 ──
     const paletteHTML = palette.map((color, i) => `
       <button
         type="button"
@@ -139,34 +132,50 @@ export class TagEditorPopover {
         aria-pressed="${i === this.selectedColorIndex}"
         tabindex="${i === this.selectedColorIndex ? '0' : '-1'}"
         role="radio"
-      ></button>
-    `).join('');
+      ></button>`).join('');
 
-    const existingTagsHTML = this.userTags.length > 0
-      ? `<div class="existing-label">Tags for @${username}</div>
-         <div class="existing-tags">${this.userTags.map(t => {
-           const c = getColor(t.colorIndex);
-           const isActive = isEdit && t.id === tag?.id;
-           return `<button type="button" class="existing-pill ${isActive ? 'active' : ''}"
-             data-tag-id="${t.id}" data-tag-name="${t.name}" data-color="${t.colorIndex}"
-             style="background:${c.hex};color:${c.textColor};"
-             title="${t.notes ?? ''}"
-           >${t.name}</button>`;
-         }).join('')}</div>`
-      : '';
+    // ── Quick-assign: all known tag names (excluding ones already on this user) ──
+    const userTagNames = new Set(this.userTags.map(t => t.name));
+    const quickTags = this.allTagNames.filter(n => !userTagNames.has(n));
+    const quickHTML = quickTags.length > 0 ? `
+      <div class="section-label">Quick assign</div>
+      <div class="quick-tags">
+        ${quickTags.slice(0, 20).map(n => {
+          const qc = this.allTagColors.get(n);
+          const bg  = qc?.hex      ?? '#1e2230';
+          const fg  = qc?.textColor ?? '#c9cdd4';
+          const border = qc ? 'transparent' : '#2a2d36';
+          return `<button type="button" class="quick-pill" data-name="${n}"
+            style="background:${bg};color:${fg};border-color:${border};">${n}</button>`;
+        }).join('')}
+      </div>` : '';
+
+    // ── User's current tags ──
+    const userTagsHTML = this.userTags.length > 0 ? `
+      <hr class="divider"/>
+      <div class="section-label">@${username}'s tags</div>
+      <div class="existing-tags">
+        ${this.userTags.map(t => {
+          const c = getColor(t.colorIndex);
+          const active = isEdit && t.id === tag?.id;
+          return `<button type="button" class="existing-pill${active ? ' active' : ''}"
+            data-tag-id="${t.id}" data-tag-name="${t.name}" data-color="${t.colorIndex}"
+            style="background:${c.hex};color:${c.textColor};"
+            title="${t.notes ?? ''}">${t.name}</button>`;
+        }).join('')}
+      </div>` : '';
 
     return `
       <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
         :host { display: block; }
 
         .popover {
-          background: #16181c;
-          border: 1px solid #2f3336;
-          border-radius: 12px;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3);
-          width: 260px;
+          background: #0f1117;
+          border: 1px solid #2a2d36;
+          border-radius: 14px;
+          box-shadow: 0 12px 40px rgba(0,0,0,0.65), 0 2px 8px rgba(0,0,0,0.4);
+          width: 300px;
           font-family: system-ui, -apple-system, sans-serif;
           color: #e7e9ea;
           overflow: hidden;
@@ -176,196 +185,150 @@ export class TagEditorPopover {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 10px 12px 0;
+          padding: 11px 14px 0;
         }
-
-        .header-title {
-          font-size: 13px;
-          font-weight: 600;
-          color: #e7e9ea;
-        }
-
+        .header-title { font-size: 13px; font-weight: 600; color: #e7e9ea; }
         .close-btn {
-          background: none;
-          border: none;
-          color: #6b7280;
-          cursor: pointer;
-          font-size: 16px;
-          line-height: 1;
-          padding: 2px;
+          background: none; border: none; color: #6b7280;
+          cursor: pointer; font-size: 15px; line-height: 1; padding: 3px;
           border-radius: 4px;
         }
-        .close-btn:hover { color: #e7e9ea; background: #2f3336; }
+        .close-btn:hover { color: #e7e9ea; background: #2a2d36; }
 
-        .body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+        .body { padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 9px; }
 
-        label {
-          font-size: 11px;
-          font-weight: 500;
-          color: #71767b;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          display: block;
-          margin-bottom: 3px;
+        .section-label {
+          font-size: 10px; font-weight: 600; color: #6b7280;
+          text-transform: uppercase; letter-spacing: 0.07em;
+          margin-bottom: 4px;
         }
 
+        /* ── Quick assign ── */
+        .quick-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+        .quick-pill {
+          background: #1e2230; color: #c9cdd4;
+          border: 1px solid #2a2d36; border-radius: 9999px;
+          padding: 3px 10px; font-size: 12px; font-weight: 500;
+          cursor: pointer; font-family: inherit;
+          transition: background 0.12s, border-color 0.12s, color 0.12s;
+        }
+        .quick-pill:hover { filter: brightness(1.15); }
+
+        /* ── Name input ── */
         input[type="text"], textarea {
           width: 100%;
-          background: #1e2127;
-          border: 1px solid #2f3336;
-          border-radius: 6px;
-          color: #e7e9ea;
-          font-size: 13px;
-          padding: 6px 8px;
-          outline: none;
+          background: #1a1d26; border: 1px solid #2a2d36;
+          border-radius: 7px; color: #e7e9ea;
+          font-size: 13px; padding: 7px 9px; outline: none;
           font-family: inherit;
         }
-        input[type="text"]:focus, textarea:focus { border-color: #1d9bf0; }
+        input[type="text"]:focus, textarea:focus { border-color: #D4A000; }
 
         .autocomplete {
-          background: #16181c;
-          border: 1px solid #2f3336;
-          border-radius: 6px;
-          max-height: 120px;
-          overflow-y: auto;
-          display: none;
-          position: absolute;
-          width: 236px;
-          z-index: 10;
+          background: #0f1117; border: 1px solid #2a2d36;
+          border-radius: 7px; max-height: 110px; overflow-y: auto;
+          display: none; position: absolute; width: 272px; z-index: 10;
         }
         .autocomplete.open { display: block; }
         .autocomplete-item {
-          padding: 6px 10px;
-          cursor: pointer;
-          font-size: 12px;
-          color: #e7e9ea;
+          padding: 6px 10px; cursor: pointer; font-size: 12px; color: #e7e9ea;
         }
-        .autocomplete-item:hover { background: #2f3336; }
+        .autocomplete-item:hover { background: #1e2230; }
 
-        .palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+        /* ── Colour palette: 2 rows × 16 ── */
+        .palette { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
         .color-swatch {
-          width: 24px;
-          height: 24px;
-          border-radius: 50%;
-          border: 2px solid transparent;
-          cursor: pointer;
+          width: 100%; aspect-ratio: 1; border-radius: 50%;
+          border: 2px solid transparent; cursor: pointer;
           transition: transform 0.1s, border-color 0.1s;
         }
-        .color-swatch:hover { transform: scale(1.15); }
+        .color-swatch:hover { transform: scale(1.2); }
         .color-swatch.selected {
-          border-color: #e7e9ea;
-          transform: scale(1.1);
-          box-shadow: 0 0 0 2px #16181c;
+          border-color: #fff; transform: scale(1.15);
+          box-shadow: 0 0 0 2px #0f1117;
         }
 
+        /* ── Notes ── */
         .notes-toggle {
-          background: none;
-          border: none;
-          color: #1d9bf0;
-          cursor: pointer;
-          font-size: 11px;
-          padding: 0;
-          font-family: inherit;
-          text-align: left;
+          background: none; border: none; color: #D4A000;
+          cursor: pointer; font-size: 11px; padding: 0;
+          font-family: inherit; text-align: left;
         }
         .notes-toggle:hover { text-decoration: underline; }
-
-        textarea { resize: vertical; min-height: 52px; font-size: 12px; display: none; }
+        textarea { resize: vertical; min-height: 50px; font-size: 12px; display: none; }
         textarea.visible { display: block; }
-
-        .char-count { font-size: 10px; color: #71767b; text-align: right; margin-top: 2px; }
+        .char-count { font-size: 10px; color: #6b7280; text-align: right; margin-top: 2px; }
         .char-count.warn { color: #f59e0b; }
 
+        /* ── Actions ── */
         .actions { display: flex; gap: 6px; }
         .btn {
-          flex: 1;
-          padding: 6px 0;
-          border-radius: 9999px;
-          font-size: 13px;
-          font-weight: 600;
-          cursor: pointer;
-          border: none;
-          font-family: inherit;
-          transition: opacity 0.15s;
+          flex: 1; padding: 7px 0; border-radius: 9999px;
+          font-size: 13px; font-weight: 600; cursor: pointer;
+          border: none; font-family: inherit; transition: opacity 0.15s;
         }
         .btn:hover { opacity: 0.85; }
         .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-        .btn-primary { background: #1d9bf0; color: #fff; }
-        .btn-cancel  { background: #2f3336; color: #e7e9ea; flex: 0 0 auto; padding: 6px 12px; }
-        .btn-delete  { background: #e63946; color: #fff; flex: 0 0 auto; padding: 6px 10px; }
+        .btn-primary { background: #D4A000; color: #0f1117; }
+        .btn-cancel  { background: #2a2d36; color: #e7e9ea; flex: 0 0 auto; padding: 7px 13px; }
+        .btn-delete  { background: #c0392b; color: #fff; flex: 0 0 auto; padding: 7px 10px; }
 
-        .divider { border: none; border-top: 1px solid #2f3336; margin: 2px 0; }
+        .divider { border: none; border-top: 1px solid #2a2d36; margin: 1px 0; }
 
-        .existing-label {
-          font-size: 10px;
-          color: #71767b;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          font-weight: 500;
-        }
-        .existing-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+        /* ── User's existing tags ── */
+        .existing-tags { display: flex; flex-wrap: wrap; gap: 5px; }
         .existing-pill {
-          border: none;
-          border-radius: 9999px;
-          padding: 2px 8px;
-          font-size: 11px;
-          font-weight: 500;
-          cursor: pointer;
-          font-family: inherit;
-          opacity: 0.75;
-          transition: opacity 0.12s;
+          border: none; border-radius: 9999px; padding: 3px 10px;
+          font-size: 12px; font-weight: 500; cursor: pointer;
+          font-family: inherit; opacity: 0.8;
+          transition: opacity 0.12s, outline 0.1s;
         }
-        .existing-pill:hover, .existing-pill.active { opacity: 1; }
-        .existing-pill.active { outline: 2px solid #e7e9ea; outline-offset: 1px; }
+        .existing-pill:hover { opacity: 1; }
+        .existing-pill.active { opacity: 1; outline: 2px solid #fff; outline-offset: 1px; }
 
-        .error-msg {
-          font-size: 11px;
-          color: #e63946;
-          display: none;
-        }
+        .error-msg { font-size: 11px; color: #e63946; display: none; }
         .error-msg.visible { display: block; }
       </style>
 
-      <div class="popover" role="dialog" aria-label="Tag editor">
+      <div class="popover" role="dialog" aria-label="Tag editor" tabindex="-1">
         <div class="header">
-          <span class="header-title">${isEdit ? `Edit tag for @${username}` : `Tag @${username}`}</span>
+          <span class="header-title">${isEdit ? `Edit tag · @${username}` : `Tag @${username}`}</span>
           <button type="button" class="close-btn" id="xt-close" aria-label="Close">✕</button>
         </div>
-
         <div class="body">
+
+          ${quickHTML}
+
+          ${quickTags.length > 0 ? '<hr class="divider"/>' : ''}
+
           <div>
-            <label for="xt-name">Tag name</label>
+            <div class="section-label">${isEdit ? 'Edit tag' : 'New tag'}</div>
             <div style="position:relative;">
-              <input
-                type="text"
-                id="xt-name"
-                maxlength="50"
-                placeholder="e.g. journalist, developer…"
+              <input type="text" id="xt-name" maxlength="50"
+                placeholder="Tag name…"
                 value="${isEdit ? (tag?.name ?? '') : ''}"
-                autocomplete="off"
-                spellcheck="false"
-              />
+                autocomplete="off" spellcheck="false"/>
               <div class="autocomplete" id="xt-autocomplete"></div>
             </div>
             <div class="error-msg" id="xt-name-error">Tag name is required</div>
           </div>
 
           <div>
-            <label>Colour</label>
-            <div class="palette" id="xt-palette" role="radiogroup" aria-label="Tag colour">${paletteHTML}</div>
+            <div class="section-label">Colour</div>
+            <div class="palette" id="xt-palette" role="radiogroup" aria-label="Tag colour">
+              ${paletteHTML}
+            </div>
           </div>
 
           <div>
             <button type="button" class="notes-toggle" id="xt-notes-toggle">
               ${isEdit && tag?.notes ? '▾ Notes' : '+ Add notes'}
             </button>
-            <textarea
-              id="xt-notes"
-              maxlength="500"
-              placeholder="Optional context…"
+            <textarea id="xt-notes" maxlength="500" placeholder="Optional context…"
               class="${isEdit && tag?.notes ? 'visible' : ''}"
             >${isEdit ? (tag?.notes ?? '') : ''}</textarea>
-            <div class="char-count" id="xt-char-count" style="display:${isEdit && tag?.notes ? 'block' : 'none'}">
+            <div class="char-count" id="xt-char-count"
+              style="display:${isEdit && tag?.notes ? 'block' : 'none'}">
               ${(tag?.notes?.length ?? 0)}/500
             </div>
           </div>
@@ -378,183 +341,162 @@ export class TagEditorPopover {
             </button>
           </div>
 
-          ${this.userTags.length > 0 ? '<hr class="divider" />' : ''}
-          ${existingTagsHTML}
+          ${userTagsHTML}
         </div>
-      </div>
-    `;
+      </div>`;
   }
 
   // ── Event binding ─────────────────────────────────────────────────────────
 
   private bindEvents(opts: PopoverOptions): void {
-    const shadow = this.shadow!;
-    const nameInput = shadow.querySelector<HTMLInputElement>('#xt-name')!;
+    const shadow        = this.shadow!;
+    const nameInput     = shadow.querySelector<HTMLInputElement>('#xt-name')!;
     const notesTextarea = shadow.querySelector<HTMLTextAreaElement>('#xt-notes')!;
-    const autocomplete = shadow.querySelector<HTMLDivElement>('#xt-autocomplete')!;
-    const charCount = shadow.querySelector<HTMLDivElement>('#xt-char-count')!;
-    const nameError = shadow.querySelector<HTMLDivElement>('#xt-name-error')!;
+    const autocomplete  = shadow.querySelector<HTMLDivElement>('#xt-autocomplete')!;
+    const charCount     = shadow.querySelector<HTMLDivElement>('#xt-char-count')!;
+    const nameError     = shadow.querySelector<HTMLDivElement>('#xt-name-error')!;
 
-    // Close button
-    shadow.querySelector('#xt-close')?.addEventListener('click', () => {
-      this.close();
-      opts.onClosed();
-    });
-    shadow.querySelector('#xt-cancel')?.addEventListener('click', () => {
-      this.close();
-      opts.onClosed();
+    shadow.querySelector('#xt-close')?.addEventListener('click', () => { this.close(); opts.onClosed(); });
+    shadow.querySelector('#xt-cancel')?.addEventListener('click', () => { this.close(); opts.onClosed(); });
+
+    // ── Quick-assign pills ──
+    shadow.querySelector('.quick-tags')?.addEventListener('click', async (e) => {
+      const pill = (e.target as Element).closest('.quick-pill') as HTMLElement | null;
+      if (!pill) return;
+      const name = pill.dataset['name'] ?? '';
+      if (!name) return;
+      // Use currently selected colour, or default 0
+      await this.saveTag(opts, name, undefined, this.selectedColorIndex);
     });
 
-    // Palette selection: click or keyboard (arrow keys)
-    const paletteEl = shadow.querySelector('#xt-palette');
-    const PALETTE_COLS = 8;
-    const PALETTE_SIZE = 16;
+    // ── Palette ──
+    const PALETTE_COLS = 16;
+    const PALETTE_SIZE = 32;
 
     const selectSwatch = (index: number): void => {
       this.selectedColorIndex = Math.max(0, Math.min(PALETTE_SIZE - 1, index));
       shadow.querySelectorAll<HTMLElement>('.color-swatch').forEach((s, i) => {
-        const isSelected = i === this.selectedColorIndex;
-        s.classList.toggle('selected', isSelected);
-        s.setAttribute('aria-pressed', String(isSelected));
-        s.setAttribute('tabindex', isSelected ? '0' : '-1');
+        const sel = i === this.selectedColorIndex;
+        s.classList.toggle('selected', sel);
+        s.setAttribute('aria-pressed', String(sel));
+        s.setAttribute('tabindex', sel ? '0' : '-1');
         s.setAttribute('aria-label',
-          (getBasePalette()[i]?.name ?? '') + (isSelected ? ' (selected)' : ''));
+          (getExtendedPalette()[i]?.name ?? '') + (sel ? ' (selected)' : ''));
       });
-      // Move focus to selected swatch
-      const selected = shadow.querySelector<HTMLElement>('.color-swatch.selected');
-      selected?.focus();
+      shadow.querySelector<HTMLElement>('.color-swatch.selected')?.focus();
     };
 
-    paletteEl?.addEventListener('click', (e) => {
-      const swatch = (e.target as Element).closest('.color-swatch') as HTMLElement | null;
-      if (swatch) selectSwatch(Number(swatch.dataset['index'] ?? 0));
+    shadow.querySelector('#xt-palette')?.addEventListener('click', (e) => {
+      const sw = (e.target as Element).closest('.color-swatch') as HTMLElement | null;
+      if (sw) selectSwatch(Number(sw.dataset['index'] ?? 0));
     });
 
-    paletteEl?.addEventListener('keydown', (e) => {
-      const swatches = shadow.querySelectorAll<HTMLElement>('.color-swatch');
+    shadow.querySelector('#xt-palette')?.addEventListener('keydown', (e) => {
       const cur = this.selectedColorIndex;
-      let next = cur;
-
-      switch (e.key) {
+      let next  = cur;
+      switch ((e as KeyboardEvent).key) {
         case 'ArrowRight': next = cur + 1; break;
         case 'ArrowLeft':  next = cur - 1; break;
         case 'ArrowDown':  next = cur + PALETTE_COLS; break;
         case 'ArrowUp':    next = cur - PALETTE_COLS; break;
         case 'Home':       next = 0; break;
-        case 'End':        next = swatches.length - 1; break;
+        case 'End':        next = PALETTE_SIZE - 1; break;
         default: return;
       }
-
-      e.preventDefault();
+      (e as KeyboardEvent).preventDefault();
       selectSwatch(next);
     });
 
-    // Notes toggle
+    // ── Notes ──
     shadow.querySelector('#xt-notes-toggle')?.addEventListener('click', () => {
       const visible = notesTextarea.classList.toggle('visible');
       charCount.style.display = visible ? 'block' : 'none';
-      if (visible) {
-        notesTextarea.focus();
-        (shadow.querySelector('#xt-notes-toggle') as HTMLButtonElement).textContent = '▾ Notes';
-      } else {
-        (shadow.querySelector('#xt-notes-toggle') as HTMLButtonElement).textContent = '+ Add notes';
-      }
+      (shadow.querySelector('#xt-notes-toggle') as HTMLButtonElement).textContent =
+        visible ? '▾ Notes' : '+ Add notes';
+      if (visible) notesTextarea.focus();
     });
-
-    // Notes char count
     notesTextarea.addEventListener('input', () => {
       const len = notesTextarea.value.length;
       charCount.textContent = `${len}/500`;
       charCount.classList.toggle('warn', len > 450);
     });
 
-    // Autocomplete
+    // ── Name / autocomplete ──
     nameInput.addEventListener('input', () => {
       this.updateAutocomplete(nameInput, autocomplete);
       nameError.classList.remove('visible');
     });
     nameInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
+      if ((e as KeyboardEvent).key === 'Enter') {
+        (e as KeyboardEvent).preventDefault();
         this.handleSave(opts, nameInput, notesTextarea, nameError);
-      } else if (e.key === 'Escape') {
+      } else if ((e as KeyboardEvent).key === 'Escape') {
         if (autocomplete.classList.contains('open')) {
           autocomplete.classList.remove('open');
-        } else {
-          this.close();
-          opts.onClosed();
-        }
+        } else { this.close(); opts.onClosed(); }
       }
     });
-
-    // Click outside → close autocomplete
-    this.shadow?.querySelector('.popover')?.addEventListener('click', (e) => {
+    shadow.querySelector('.popover')?.addEventListener('click', (e) => {
       if (!(e.target as Element).closest('#xt-autocomplete') &&
-          !(e.target as Element).closest('#xt-name')) {
+          !(e.target as Element).closest('#xt-name'))
         autocomplete.classList.remove('open');
-      }
     });
 
-    // Save
-    shadow.querySelector('#xt-save')?.addEventListener('click', () => {
-      this.handleSave(opts, nameInput, notesTextarea, nameError);
-    });
+    // ── Save / Delete ──
+    shadow.querySelector('#xt-save')?.addEventListener('click', () =>
+      this.handleSave(opts, nameInput, notesTextarea, nameError));
 
-    // Delete (edit mode only)
     shadow.querySelector('#xt-delete')?.addEventListener('click', async () => {
       if (!opts.existingTag) return;
       const saveBtn = shadow.querySelector<HTMLButtonElement>('#xt-save')!;
       const delBtn  = shadow.querySelector<HTMLButtonElement>('#xt-delete')!;
-      saveBtn.disabled = true;
-      delBtn.disabled  = true;
-      delBtn.textContent = '…';
-
+      saveBtn.disabled = true; delBtn.disabled = true; delBtn.textContent = '…';
       await sendMessage<void>({
         channel: 'tags:delete',
         payload: { userId: opts.userId, tagId: opts.existingTag.id } satisfies DeleteTagRequest,
       });
-
       this.close();
       announce(`Tag deleted from @${opts.userId.username}`, 'polite');
       opts.onDeleted(opts.existingTag.id);
     });
 
-    // Existing tag pills — switch to edit mode
+    // ── Existing tag pills → edit ──
     shadow.querySelector('.existing-tags')?.addEventListener('click', async (e) => {
       const pill = (e.target as Element).closest('.existing-pill') as HTMLElement | null;
       if (!pill) return;
-      const tagId    = pill.dataset['tagId'];
-      const tagName  = pill.dataset['tagName'];
-      const colorStr = pill.dataset['color'];
-      if (!tagId) return;
-
-      const existingTag = this.userTags.find(t => t.id === tagId);
-      if (!existingTag) return;
-
-      // Re-open in edit mode
-      await this.open({
-        ...opts,
-        mode: 'edit',
-        existingTag,
-      });
+      const existingTag = this.userTags.find(t => t.id === pill.dataset['tagId']);
+      if (existingTag) await this.open({ ...opts, mode: 'edit', existingTag });
     });
 
-    // Click outside the popover → close
-    const outsideHandler = (e: MouseEvent): void => {
+    // ── Click outside → close ──
+    const outside = (e: MouseEvent): void => {
       if (!this.host?.contains(e.target as Node) &&
           !(e.target as Element).closest('[data-xtagger-add-btn]')) {
-        this.close();
-        opts.onClosed();
-        document.removeEventListener('click', outsideHandler, true);
+        this.close(); opts.onClosed();
+        document.removeEventListener('click', outside, true);
       }
     };
-    // Slight delay so the opening click doesn't immediately close it
-    setTimeout(() => {
-      document.addEventListener('click', outsideHandler, true);
-    }, 100);
+    setTimeout(() => document.addEventListener('click', outside, true), 100);
   }
 
-  // ── Save logic ────────────────────────────────────────────────────────────
+  // ── Save helpers ──────────────────────────────────────────────────────────
+
+  private async saveTag(
+    opts: PopoverOptions,
+    name: string,
+    notes: string | undefined,
+    colorIndex: number,
+  ): Promise<void> {
+    const res = await sendMessage<CreateTagResponse>({
+      channel: 'tags:create',
+      payload: { userId: opts.userId, name, colorIndex, notes } satisfies CreateTagRequest,
+    });
+    if (res.ok && res.data) {
+      this.close();
+      announce(`Tag "${res.data.name}" added to @${opts.userId.username}`, 'polite');
+      opts.onSaved(res.data);
+    }
+  }
 
   private async handleSave(
     opts: PopoverOptions,
@@ -563,15 +505,10 @@ export class TagEditorPopover {
     nameError: HTMLDivElement,
   ): Promise<void> {
     const name = nameInput.value.trim();
-    if (!name) {
-      nameError.classList.add('visible');
-      nameInput.focus();
-      return;
-    }
+    if (!name) { nameError.classList.add('visible'); nameInput.focus(); return; }
 
     const saveBtn = this.shadow?.querySelector<HTMLButtonElement>('#xt-save');
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '…'; }
-
     const notes = notesTextarea.value.trim() || undefined;
 
     let savedTag: Tag | null = null;
@@ -580,10 +517,8 @@ export class TagEditorPopover {
       const res = await sendMessage<CreateTagResponse>({
         channel: 'tags:create',
         payload: {
-          userId: opts.userId,
-          name,
-          colorIndex: this.selectedColorIndex,
-          notes,
+          userId: opts.userId, name,
+          colorIndex: this.selectedColorIndex, notes,
         } satisfies CreateTagRequest,
       });
       if (res.ok && res.data) savedTag = res.data;
@@ -591,11 +526,8 @@ export class TagEditorPopover {
       const res = await sendMessage<UpdateTagResponse>({
         channel: 'tags:update',
         payload: {
-          userId: opts.userId,
-          tagId: opts.existingTag!.id,
-          name,
-          colorIndex: this.selectedColorIndex,
-          notes,
+          userId: opts.userId, tagId: opts.existingTag!.id,
+          name, colorIndex: this.selectedColorIndex, notes,
         } satisfies UpdateTagRequest,
       });
       if (res.ok && res.data) savedTag = res.data;
@@ -611,7 +543,10 @@ export class TagEditorPopover {
       );
       opts.onSaved(savedTag);
     } else {
-      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = opts.mode === 'add' ? 'Add tag' : 'Update'; }
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = opts.mode === 'add' ? 'Add tag' : 'Update';
+      }
     }
   }
 
@@ -627,12 +562,10 @@ export class TagEditorPopover {
 
     if (matches.length === 0) { container.classList.remove('open'); return; }
 
-    container.innerHTML = matches.map(name =>
-      `<div class="autocomplete-item" data-name="${name}">${name}</div>`,
+    container.innerHTML = matches.map(n =>
+      `<div class="autocomplete-item" data-name="${n}">${n}</div>`
     ).join('');
-
     container.classList.add('open');
-
     container.querySelectorAll('.autocomplete-item').forEach(item => {
       item.addEventListener('click', () => {
         input.value = (item as HTMLElement).dataset['name'] ?? '';
@@ -644,23 +577,18 @@ export class TagEditorPopover {
 
   // ── Positioning ───────────────────────────────────────────────────────────
 
-  private position(anchor: Element): void {
+  position(anchor: Element): void {
     if (!this.host) return;
-    const rect = anchor.getBoundingClientRect();
+    const rect    = anchor.getBoundingClientRect();
     const scrollY = window.scrollY;
     const scrollX = window.scrollX;
-    const vpHeight = window.innerHeight;
-    const POPOVER_HEIGHT = 340; // approximate
+    const POPOVER_H = 360;
+    const POPOVER_W = 300;
 
-    let top: number;
-    const left = Math.min(rect.left + scrollX, window.innerWidth - 280);
-
-    // Flip up if near viewport bottom
-    if (rect.bottom + POPOVER_HEIGHT > vpHeight) {
-      top = rect.top + scrollY - POPOVER_HEIGHT - 6;
-    } else {
-      top = rect.bottom + scrollY + 6;
-    }
+    let top  = rect.bottom + scrollY + 6;
+    let left = Math.min(rect.left + scrollX, window.innerWidth - POPOVER_W - 8);
+    if (rect.bottom + POPOVER_H > window.innerHeight)
+      top = rect.top + scrollY - POPOVER_H - 6;
 
     this.host.style.top  = `${Math.max(scrollY + 8, top)}px`;
     this.host.style.left = `${Math.max(8, left)}px`;

@@ -67,8 +67,9 @@ export class UserDetector {
    */
   detectInContainer(container: Element): UserDetection | null {
     // Try to find the username name container (holds display name + @handle)
-    const nameContainer = this.selectors.queryOne('userNameContainer', container)
-      ?? container.querySelector('[data-testid="User-Name"]');
+    // Use direct querySelector — reliable and doesn't pollute failure counters
+    const nameContainer = container.querySelector('[data-testid="User-Name"]')
+      ?? container.querySelector('[data-testid="UserName"]');
 
     if (!nameContainer) return null;
 

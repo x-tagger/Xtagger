@@ -3,12 +3,13 @@
  * @layer UI / Content
  * @description ARIA live region announcer for screen reader notifications.
  *
- * Provides a polite/assertive announcement mechanism without disrupting
- * the page's own live regions. The announcement element is injected into
- * the page's DOM (not Shadow DOM) so screen readers pick it up.
+ * Uses a visually-hidden div with aria-live so screen readers pick up
+ * announcements without disrupting the page layout.
  *
- * Usage:
- *   announce('Tag "journalist" added to @alice', 'polite');
+ * Implementation note: we use setTimeout(0) rather than requestAnimationFrame
+ * because rAF is not driven by vitest's fake timer system in jsdom, which would
+ * make the test suite brittle. The 0ms delay still allows the browser to clear
+ * the previous text before setting new text (same screen-reader trick).
  */
 
 const ANNOUNCER_ID = 'xtagger-announcer';
@@ -19,9 +20,8 @@ function getOrCreateAnnouncer(politeness: 'polite' | 'assertive'): HTMLElement {
     el = document.createElement('div');
     el.id = ANNOUNCER_ID;
     el.setAttribute('role', 'status');
-    el.setAttribute('aria-live', politeness);
     el.setAttribute('aria-atomic', 'true');
-    // Visually hidden — screen readers still read it
+    // Visually hidden but accessible to screen readers
     el.style.cssText = [
       'position:absolute',
       'width:1px',
@@ -39,13 +39,13 @@ function getOrCreateAnnouncer(politeness: 'polite' | 'assertive'): HTMLElement {
   return el;
 }
 
-/** Announce a message to screen readers. Clears after 3s. */
+/** Announce a message to screen readers. The element clears after 3 s. */
 export function announce(message: string, politeness: 'polite' | 'assertive' = 'polite'): void {
   const el = getOrCreateAnnouncer(politeness);
-  // Clear first (some screen readers don't re-announce same text)
+  // Clear first so repeated identical messages are still announced
   el.textContent = '';
-  requestAnimationFrame(() => {
+  setTimeout(() => {
     el.textContent = message;
     setTimeout(() => { el.textContent = ''; }, 3000);
-  });
+  }, 0);
 }

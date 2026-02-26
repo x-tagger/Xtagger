@@ -70,18 +70,26 @@ export const UserIdentifierSchema = z.object({
 
 // ─── Export Manifest ─────────────────────────────────────────────────────────
 
+const CollectionCriteriaSchema = z.object({
+  name:           z.string().min(1).max(100),
+  includeAnyTags: z.array(z.string()).default([]),
+  includeAllTags: z.array(z.string()).default([]),
+  excludeTags:    z.array(z.string()).default([]),
+});
+
 export const ExportManifestSchema = z.object({
   schemaVersion: z
     .number()
     .int()
     .min(1)
     .max(CURRENT_SCHEMA_VERSION + 10, 'Schema version too far in the future'),
-  exportedAt: z.string().datetime(),
-  exportedBy: z.string().max(100).optional(),
+  exportedAt:  z.string().datetime(),
+  exportedBy:  z.string().max(100).optional(),
   description: z.string().max(500).optional(),
-  platform: z.string().min(1),
-  checksum: z.string().length(64, 'Checksum must be a 64-char SHA-256 hex digest'),
-  entries: z.record(z.string(), z.array(TagSchema)),
+  collection:  CollectionCriteriaSchema.optional(),
+  platform:    z.string().min(1),
+  checksum:    z.string().length(64, 'Checksum must be a 64-char SHA-256 hex digest'),
+  entries:     z.record(z.string(), z.array(TagSchema)),
 });
 
 export type ExportManifestSchemaType = z.infer<typeof ExportManifestSchema>;

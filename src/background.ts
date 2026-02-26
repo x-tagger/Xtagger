@@ -68,7 +68,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     logger.info('Fresh install — opening onboarding', { version: CURRENT_SCHEMA_VERSION });
     // Open onboarding tab on fresh install
     chrome.tabs.create({
-      url: chrome.runtime.getURL('onboarding.html'),
+      url: chrome.runtime.getURL('src/ui/onboarding/index.html'),
     });
   }
 

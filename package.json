@@ -4,7 +4,7 @@
   "description": "Local-first annotation layer for social media platforms",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.content.config.ts",
     "build:watch": "vite build --watch",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
@@ -40,5 +40,6 @@
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@9.15.0",
+  "license": "GPL-3.0-or-later"
 }

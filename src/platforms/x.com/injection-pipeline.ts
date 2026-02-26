@@ -224,23 +224,29 @@ export class InjectionPipeline {
   }
 
   private async reInjectUser(username: string): Promise<void> {
-    // Find all anchors in the DOM tagged with this username and re-fetch
-    const injectedElements = document.querySelectorAll(
-      `[data-xtagger-injected]`,
-    );
-
+    // Pass 1: update any already-injected anchors for this user
+    const injectedElements = document.querySelectorAll("[data-xtagger-injected]");
     for (const anchor of injectedElements) {
-      // We need to re-detect which username this anchor belongs to
-      // by re-scanning the containing article
       const container = anchor.closest('[data-testid="cellInnerDiv"]')
         ?? anchor.closest('[role="article"]');
       if (!container) continue;
-
       const detections = this.platform.detectUsers(container);
       for (const d of detections) {
         if (d.userId.username === username) {
           this.injectionManager.remove(anchor as Element);
           await this.fetchAndInject(username, d.injectionAnchor as Element);
+        }
+      }
+    }
+
+    // Pass 2: also scan the whole page for this username in case no
+    // injection existed yet (first tag ever added for this user)
+    const allDetections = this.platform.detectUsers(document.body);
+    for (const d of allDetections) {
+      if (d.userId.username === username) {
+        const anchor = d.injectionAnchor as Element;
+        if (!this.injectionManager.isInjected(anchor)) {
+          await this.fetchAndInject(username, anchor);
         }
       }
     }

@@ -1,156 +1,176 @@
 /**
  * @file content/index.ts
- * @layer UI / Content Script Entry Point
- * @description Injected into X.com pages. Bootstraps the full injection pipeline.
- *
- * Boot sequence:
- *   1. Guard: X.com only, no double-init
- *   2. Load settings from background (fallback: defaults)
- *   3. Load selector config (bundled JSON)
- *   4. Wire: XPlatformAdapter → InjectionPipeline → HoverTrigger → TagEditorPopover
- *   5. Listen for inbound messages: settings:push, content:open-tag-editor
+ * Content script entry point. Injected into X.com pages.
  */
 
-import { EventBus }           from '@core/events/event-bus';
-import { ConsoleLogger }      from '@shared/logger';
-import { sendMessage }        from '@shared/messages';
-import { XPlatformAdapter }   from '@platforms/x.com/x-platform-adapter';
-import { InjectionPipeline }  from '@platforms/x.com/injection-pipeline';
-import { HoverTrigger }       from './hover-trigger';
-import { TagEditorPopover }   from './tag-editor-popover';
-import { DEFAULT_SETTINGS }   from '@core/model/entities';
-import type { ExtensionSettings } from '@core/model/entities';
-import type { Tag, UserIdentifier } from '@core/model/entities';
-import type { GetSettingsResponse } from '@shared/messages';
+import { EventBus }          from '@core/events/event-bus';
+import { ConsoleLogger }     from '@shared/logger';
+import { XPlatformAdapter }  from '@platforms/x.com/x-platform-adapter';
+import { InjectionPipeline } from '@platforms/x.com/injection-pipeline';
+import { HoverTrigger }      from './hover-trigger';
+import { TagEditorPopover }  from './tag-editor-popover';
+import { DEFAULT_SETTINGS }  from '@core/model/entities';
+import type {
+  ExtensionSettings,
+  Tag,
+  UserIdentifier,
+} from '@core/model/entities';
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+function getSettingsWithTimeout(ms: number): Promise<ExtensionSettings | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    try {
+      chrome.runtime.sendMessage(
+        { channel: 'settings:get', payload: {} },
+        (response: { ok: boolean; data?: ExtensionSettings } | undefined) => {
+          clearTimeout(timer);
+          if (chrome.runtime.lastError || !response?.ok || !response.data) {
+            resolve(null);
+          } else {
+            resolve(response.data);
+          }
+        }
+      );
+    } catch {
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
 
 async function boot(): Promise<void> {
-  const logger = new ConsoleLogger('Content', 'warn');
+  const logger = new ConsoleLogger('Content', 'debug');
 
-  // Only run on X.com / Twitter
+  console.log(
+    '%c 🏷️ XTagger content script loaded ',
+    'background:#C49000;color:#0F1117;font-weight:bold;font-size:13px;border-radius:4px;padding:2px 6px'
+  );
+
   const host = window.location.hostname;
   if (!host.includes('x.com') && !host.includes('twitter.com')) return;
 
-  // Prevent double-init
   if (document.documentElement.hasAttribute('data-xtagger-active')) return;
   document.documentElement.setAttribute('data-xtagger-active', '1');
 
-  // Load settings; fall back to defaults if background isn't ready
+  // Load settings (2s timeout, then use defaults)
   let settings: ExtensionSettings = DEFAULT_SETTINGS;
   try {
-    const settingsResult = await sendMessage<GetSettingsResponse>({
-      channel: 'settings:get',
-      payload: {},
-    });
-    if (settingsResult.ok && settingsResult.data) {
-      settings = settingsResult.data;
-    }
+    const loaded = await getSettingsWithTimeout(2000);
+    if (loaded) settings = loaded;
   } catch {
-    logger.warn('Could not load settings from background — using defaults');
+    logger.warn('Settings load failed — using defaults');
   }
 
   if (settings.displayMode === 'hidden') {
-    logger.info('Display mode hidden — injection disabled');
-    // Still listen for settings changes so we can re-enable without a reload
-    listenForSettingsChange(null, null, null, null);
+    logger.info('Display mode hidden — not injecting');
     return;
   }
 
-  // Load bundled selector config
-  let selectorConfig: object = { selectorVersion: 0, lastVerified: '', platform: 'x.com', selectors: {} };
+  // Load selector config
+  let selectorConfig: object = {
+    selectorVersion: 0,
+    lastVerified: '',
+    platform: 'x.com',
+    selectors: {},
+  };
   try {
     const res = await fetch(chrome.runtime.getURL('selector-configs/x.com.json'));
-    selectorConfig = await res.json() as object;
+    selectorConfig = (await res.json()) as object;
   } catch (e) {
-    logger.error('Failed to load selector config', { error: String(e) });
+    logger.warn('Selector config load failed', { error: String(e) });
   }
 
-  // Wire the local EventBus
-  const bus = new EventBus();
-
-  // Platform adapter + injection pipeline
-  const platform = new XPlatformAdapter(bus, logger, selectorConfig);
-  const pipeline  = new InjectionPipeline(platform, bus, logger);
-
-  // Tag editor (singleton popover)
-  const popover = new TagEditorPopover(logger);
-
-  // Hover trigger
+  const bus          = new EventBus();
+  const platform     = new XPlatformAdapter(bus, logger, selectorConfig);
+  const pipeline     = new InjectionPipeline(platform, bus, logger);
+  const popover      = new TagEditorPopover(logger);
   const hoverTrigger = new HoverTrigger(logger);
 
-  const onTagSaved = (userId: UserIdentifier, tag: Tag): void => {
+  function onTagSaved(userId: UserIdentifier, tag: Tag): void {
     bus.emit('tag:created', { tag, userId });
-  };
-  const onTagDeleted = (userId: UserIdentifier, tagId: string): void => {
-    bus.emit('tag:deleted', { tagId, userId });
-  };
+  }
+  function onTagDeleted(userId: UserIdentifier, tagId: string): void {
+    bus.emit('tag:deleted', { tagId, userId, soft: false });
+  }
 
   hoverTrigger.attach({
-    onAddTag: (userId, anchor) => {
-      popover.open({
-        mode: 'add', userId, anchor,
-        onSaved: (tag) => onTagSaved(userId, tag),
-        onDeleted: (tagId) => onTagDeleted(userId, tagId),
-        onClosed: () => {},
-      });
-    },
-    onEditTag: (userId, tag, anchor) => {
-      popover.open({
-        mode: 'edit', userId, anchor, existingTag: tag,
-        onSaved: (savedTag) => onTagSaved(userId, savedTag),
-        onDeleted: (tagId) => onTagDeleted(userId, tagId),
-        onClosed: () => {},
-      });
-    },
-  });
-
-  await pipeline.start(settings);
-
-  listenForSettingsChange(bus, pipeline, popover, hoverTrigger);
-
-  // Handle messages from background (context menu, settings push)
-  chrome.runtime.onMessage.addListener((message: unknown) => {
-    if (typeof message !== 'object' || message === null) return;
-    const { channel, payload } = message as { channel?: string; payload?: unknown };
-
-    if (channel === 'content:open-tag-editor') {
-      const { username } = payload as { username: string; platform: string };
-      const anchor = document.querySelector('[data-testid="User-Name"]') ?? document.body;
+    onAddTag(userId, anchor) {
       popover.open({
         mode: 'add',
-        userId: { platform: 'x.com', username, firstSeen: Date.now(), lastSeen: Date.now() },
+        userId,
         anchor,
-        onSaved: (tag) => onTagSaved({ platform: 'x.com', username, firstSeen: 0, lastSeen: 0 }, tag),
-        onDeleted: (tagId) => onTagDeleted({ platform: 'x.com', username, firstSeen: 0, lastSeen: 0 }, tagId),
-        onClosed: () => {},
+        onSaved:   (tag)   => onTagSaved(userId, tag),
+        onDeleted: (tagId) => onTagDeleted(userId, tagId),
+        onClosed:  ()      => { /* nothing */ },
+      });
+    },
+    onEditTag(userId, tag, anchor) {
+      popover.open({
+        mode: 'edit',
+        userId,
+        anchor,
+        existingTag: tag,
+        onSaved:   (saved) => onTagSaved(userId, saved),
+        onDeleted: (tagId) => onTagDeleted(userId, tagId),
+        onClosed:  ()      => { /* nothing */ },
+      });
+    },
+  });
+
+  // Start pipeline (fire and forget — it runs forever via MutationObserver)
+  pipeline.start(settings).catch((e: unknown) =>
+    logger.error('Pipeline start error', { error: String(e) })
+  );
+
+  chrome.runtime.onMessage.addListener((message: unknown) => {
+    if (typeof message !== 'object' || message === null) return;
+    const msg = message as Record<string, unknown>;
+
+    if (msg['channel'] === 'content:open-tag-editor') {
+      const payload  = msg['payload'] as { username: string };
+      const username = payload.username;
+      const anchor   = document.querySelector('[data-testid="User-Name"]') ?? document.body;
+      const userId: UserIdentifier = {
+        platform: 'x.com', username, firstSeen: Date.now(), lastSeen: Date.now(),
+      };
+      popover.open({
+        mode: 'add', userId, anchor,
+        onSaved:   (tag)   => onTagSaved(userId, tag),
+        onDeleted: (tagId) => onTagDeleted(userId, tagId),
+        onClosed:  ()      => { /* nothing */ },
       });
     }
 
-    if (channel === 'settings:push') {
-      const { displayMode, theme } = payload as Partial<ExtensionSettings>;
-      if (displayMode) bus.emit('settings:changed', { key: 'displayMode', value: displayMode });
+    if (msg['channel'] === 'settings:push') {
+      const payload    = msg['payload'] as Partial<ExtensionSettings>;
+      if (payload.displayMode) {
+        bus.emit('settings:changed', { key: 'displayMode', value: payload.displayMode });
+      }
     }
   });
 
-  logger.info('XTagger active', { platform: platform.platformId, displayMode: settings.displayMode });
-}
+  logger.info('XTagger fully active', { displayMode: settings.displayMode });
 
-function listenForSettingsChange(
-  bus: EventBus | null,
-  pipeline: InjectionPipeline | null,
-  _popover: TagEditorPopover | null,
-  _hover: HoverTrigger | null,
-): void {
-  window.addEventListener('xtagger:settings-changed', (e) => {
-    const detail = (e as CustomEvent<Partial<ExtensionSettings>>).detail;
-    if (detail.displayMode && bus) {
-      bus.emit('settings:changed', { key: 'displayMode', value: detail.displayMode });
-    }
-  });
+  // Visible badge confirming content script is running — bottom-right corner
+  const badge = document.createElement('div');
+  badge.style.cssText = [
+    'position:fixed',
+    'top:10px',
+    'right:14px',
+    'z-index:2147483647',
+    'background:#C49000',
+    'color:#fff',
+    'font-family:monospace',
+    'font-size:10px',
+    'font-weight:bold',
+    'padding:3px 8px',
+    'border-radius:9999px',
+    'opacity:0.85',
+    'pointer-events:none',
+  ].join(';');
+  badge.textContent = '🏷️ XTagger';
+  document.body.appendChild(badge);
 }
-
-// ─── Run ──────────────────────────────────────────────────────────────────────
 
 boot().catch((e: unknown) => {
   console.error('[XTagger] Boot failed:', e);

@@ -1,9 +1,14 @@
 /**
  * @file navigation-observer.test.ts
  * @description Unit tests for NavigationObserver using jsdom.
+ *
+ * Important: each test calls NavigationObserver.restoreForTesting() in afterEach
+ * to undo the history.pushState / replaceState patches. Without this, the patched
+ * methods accumulate across tests (each new observer would re-wrap the already-
+ * patched method), causing navigation callbacks to fire multiple times.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventBus } from '../../../src/core/events/event-bus';
 import { NoopLogger } from '../../../src/shared/logger';
 import { NavigationObserver } from '../../../src/platforms/x.com/navigation-observer';
@@ -15,11 +20,12 @@ describe('NavigationObserver', () => {
   beforeEach(() => {
     bus      = new EventBus();
     observer = new NavigationObserver(bus, new NoopLogger());
-    // Reset location
     window.history.pushState({}, '', '/');
   });
 
   afterEach(() => {
+    // Remove the history patches so the next test starts with a clean slate
+    NavigationObserver.restoreForTesting();
     window.history.pushState({}, '', '/');
   });
 
@@ -50,16 +56,16 @@ describe('NavigationObserver', () => {
     const sub = observer.observe(handler);
 
     const current = window.location.href;
-    window.history.replaceState({}, '', current); // Same URL
+    window.history.replaceState({}, '', current); // same URL → no event
 
     expect(handler).not.toHaveBeenCalled();
     sub.dispose();
   });
 
   it('passes previous URL to callback', () => {
-    const handler = vi.fn();
     window.history.pushState({}, '', '/home');
     observer = new NavigationObserver(bus, new NoopLogger());
+    const handler = vi.fn();
     const sub = observer.observe(handler);
 
     window.history.pushState({}, '', '/notifications');
@@ -79,7 +85,10 @@ describe('NavigationObserver', () => {
     window.history.pushState({}, '', '/explore');
 
     expect(busHandler).toHaveBeenCalledOnce();
-    expect(busHandler.mock.calls[0]?.[0].url).toContain('/explore');
+    expect(busHandler.mock.calls[0]?.[0]).toMatchObject({
+      url: expect.stringContaining('/explore'),
+      previousUrl: expect.any(String),
+    });
 
     sub.dispose();
   });
@@ -89,16 +98,15 @@ describe('NavigationObserver', () => {
     const sub = observer.observe(handler);
     sub.dispose();
 
-    window.history.pushState({}, '', '/new-page');
+    window.history.pushState({}, '', '/settings');
+
     expect(handler).not.toHaveBeenCalled();
   });
 
   it('getCurrentUrl() returns the current URL', () => {
-    window.history.pushState({}, '', '/current');
-    const obs = new NavigationObserver(bus, new NoopLogger());
-    const sub = obs.observe(() => {});
-    window.history.pushState({}, '', '/updated');
-    expect(obs.getCurrentUrl()).toContain('/updated');
+    const sub = observer.observe(() => {});
+    window.history.pushState({}, '', '/messages');
+    expect(observer.getCurrentUrl()).toContain('/messages');
     sub.dispose();
   });
 });

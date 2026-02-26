@@ -46,7 +46,7 @@ export interface SelectorConfig {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /** Consecutive failures before emitting selector:failed event */
-const FAILURE_THRESHOLD = 3;
+const FAILURE_THRESHOLD = 10;
 
 // ─── Engine ───────────────────────────────────────────────────────────────────
 

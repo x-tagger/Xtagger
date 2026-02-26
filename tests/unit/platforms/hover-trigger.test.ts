@@ -1,19 +1,31 @@
 /**
  * @file hover-trigger.test.ts
  * @description Unit tests for HoverTrigger.
+ *
+ * DOM notes:
+ *   Real X.com uses relative hrefs: href="/username"
+ *   This matches the selector  a[href^="/"]  in showIcon().
+ *   We mirror that here. Absolute URLs would require the
+ *   a[href*="x.com/"] branch of the selector.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { NoopLogger } from '../../../src/shared/logger';
-import { HoverTrigger } from '../../../src/ui/content/hover-trigger';
+import { NoopLogger }    from '../../../src/shared/logger';
+import { HoverTrigger }  from '../../../src/ui/content/hover-trigger';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Mirrors real X.com DOM: relative href so a[href^="/"] selector matches */
 function tweetHTML(username: string): string {
   return `
     <div data-testid="cellInnerDiv">
       <div data-testid="User-Name">
-        <a href="https://x.com/${username}" role="link">${username}</a>
+        <a href="/${username}" role="link">
+          <span>${username}</span>
+        </a>
+        <a href="/${username}" role="link">
+          <span dir="ltr"><span>@${username}</span></span>
+        </a>
       </div>
     </div>
   `;
@@ -64,6 +76,7 @@ describe('HoverTrigger', () => {
     const nameContainer = document.querySelector('[data-testid="User-Name"]')!;
     fireMouseover(nameContainer);
     const btn = document.querySelector<HTMLElement>('[data-xtagger-add-btn]');
+    expect(btn).not.toBeNull();
     expect(btn?.dataset['username']).toBe('testuser');
   });
 
@@ -77,8 +90,9 @@ describe('HoverTrigger', () => {
     document.body.innerHTML = tweetHTML('alice');
     const nameContainer = document.querySelector('[data-testid="User-Name"]')!;
     fireMouseover(nameContainer);
-    const btn = document.querySelector('[data-xtagger-add-btn]')!;
-    fireClick(btn);
+    const btn = document.querySelector('[data-xtagger-add-btn]');
+    expect(btn).not.toBeNull();
+    fireClick(btn!);
     expect(onAddTag).toHaveBeenCalledOnce();
     expect(onAddTag.mock.calls[0]?.[0].username).toBe('alice');
   });
@@ -99,7 +113,7 @@ describe('HoverTrigger', () => {
     document.body.innerHTML = tweetHTML('alice');
     const container = document.querySelector('[data-testid="User-Name"]')!;
     fireMouseover(container);
-    fireMouseover(container); // second hover
+    fireMouseover(container); // same target — guard should prevent duplicate
     expect(document.querySelectorAll('[data-xtagger-add-btn]').length).toBe(1);
   });
 

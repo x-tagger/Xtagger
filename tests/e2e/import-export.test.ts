@@ -5,29 +5,26 @@
 
 import { test, expect } from './fixtures';
 
-// Minimal valid export manifest for import testing
+// Valid export manifest matching ExportManifest interface exactly.
+// entries key format: "platform:username"
+// Tag id must be a valid UUID v4 (TagSchema validates this)
 const VALID_EXPORT = JSON.stringify({
-  version: '1',
+  schemaVersion: 1,
   platform: 'x.com',
   exportedAt: new Date().toISOString(),
-  checksum: 'ignored-in-import-preview',
-  users: [
-    {
-      username: 'e2e_imported_user',
-      platform: 'x.com',
-      displayName: 'E2E Import Test',
-      tags: [
-        {
-          id: 'e2e-import-001',
-          name: 'e2e-imported-tag',
-          colorIndex: 4,
-          source: { type: 'imported' },
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      ],
-    },
-  ],
+  checksum: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  entries: {
+    'x.com:e2e_imported_user': [
+      {
+        id: '018e1234-5678-7abc-9def-000000000001',
+        name: 'e2e-imported-tag',
+        colorIndex: 4,
+        source: { type: 'local' },
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+      },
+    ],
+  },
 });
 
 test.describe('Import / Export', () => {

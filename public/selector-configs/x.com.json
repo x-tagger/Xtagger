@@ -1,0 +1,46 @@
+{
+  "selectorVersion": 1,
+  "lastVerified": "2025-01-15",
+  "platform": "x.com",
+  "comment": "Selectors are tried in order. Add new strategies at the END to preserve priority.",
+  "selectors": {
+    "feedContainer": {
+      "description": "The main scrollable content area",
+      "strategies": [
+        { "type": "testid", "value": "[data-testid='primaryColumn']" },
+        { "type": "aria",   "value": "main[role='main']" },
+        { "type": "structural", "value": "div[data-at-shortcutkeys] > div > div" }
+      ]
+    },
+    "tweetContainer": {
+      "description": "Individual tweet/post wrapper",
+      "strategies": [
+        { "type": "testid", "value": "[data-testid='cellInnerDiv']" },
+        { "type": "aria",   "value": "[role='article']" },
+        { "type": "structural", "value": "section[role='region'] > div > div" }
+      ]
+    },
+    "userNameContainer": {
+      "description": "Container holding display name + @username",
+      "strategies": [
+        { "type": "testid", "value": "[data-testid='User-Name']" },
+        { "type": "structural", "value": "a[role='link'][href^='/'] div[dir='ltr'] > span" }
+      ]
+    },
+    "userHandle": {
+      "description": "The @username text element",
+      "strategies": [
+        { "type": "testid", "value": "[data-testid='User-Name'] a[role='link'][href^='/']:last-child" },
+        { "type": "structural", "value": "span[dir='ltr'] > span:first-child" },
+        { "type": "text", "value": "span[contains(@, '@')]" }
+      ]
+    },
+    "profileUserName": {
+      "description": "@username on profile pages",
+      "strategies": [
+        { "type": "testid", "value": "[data-testid='UserName']" },
+        { "type": "aria",   "value": "div[data-testid='UserProfileHeader_Items'] span" }
+      ]
+    }
+  }
+}

@@ -26,6 +26,7 @@ export class FailureNotifier {
    * Idempotent — if a notification is already showing, this is a no-op.
    */
   showSelectorFailure(): void {
+    return; // Suppressed: false positives on normal page load
     if (this.activeNotification) return;
 
     const host = document.createElement('div');

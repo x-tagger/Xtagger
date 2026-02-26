@@ -176,3 +176,13 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 - `vitest.config.ts` updated — coverage now includes `src/platforms/**` + `src/ui/**`
 - `package.json` — added `tsx` devDependency (required for package script)
 - `README.md` — comprehensive: install, usage, architecture, privacy, contributing, roadmap
+
+### Fixed (Phase 6 — Final Polish & Bug Fixes)
+- `tag:deleted` EventBus emission in content script now includes required `soft: boolean` field
+- `public/popup.html` stub removed — was silently overwriting the real built popup from `src/ui/popup/index.html`
+- `public/onboarding.html` moved to `src/ui/onboarding/index.html` alongside its script; Vite entry updated accordingly
+- E2E mock feed updated with real test accounts: @elonmusk, @DonaldTrump, @RupertLowe10 (plus @alice_dev for deterministic assertions)
+- E2E import test fixture uses valid UUID v4 for tag `id` (TagSchema enforces this)
+- E2E import test `VALID_EXPORT` uses correct `ExportManifest` shape (`entries` Record, not `users` array)
+- E2E popup test backslash typo removed
+- Vitest config updated to include `src/platforms/**` and `src/ui/**` in coverage

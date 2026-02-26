@@ -7,7 +7,9 @@ on:
     branches: [main]
 
 jobs:
-  ci:
+  # ── Unit + integration tests ──────────────────────────────────────────────
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,41 +44,134 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
-      - name: Unit tests
+      - name: Unit & integration tests
         run: pnpm run test:coverage
 
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+
+  # ── Build + bundle size check ─────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install
+        run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm run build
 
       - name: Check bundle sizes
         run: |
-          CONTENT_SIZE=$(stat -c%s dist/content.js 2>/dev/null || echo 999999999)
-          POPUP_SIZE=$(stat -c%s dist/popup.js 2>/dev/null || echo 999999999)
-          echo "Content script: ${CONTENT_SIZE} bytes (budget: 51200)"
-          echo "Popup: ${POPUP_SIZE} bytes (budget: 204800)"
-          if [ "$CONTENT_SIZE" -gt 51200 ]; then
-            echo "❌ Content script exceeds 50KB budget!"
+          echo "=== Bundle size report ==="
+          FAILED=0
+
+          check_size() {
+            local file="$1"
+            local budget="$2"
+            local label="$3"
+            if [ -f "dist/$file" ]; then
+              SIZE=$(stat -c%s "dist/$file")
+              KB=$(echo "scale=1; $SIZE/1024" | bc)
+              BUDGET_KB=$(echo "scale=0; $budget/1024" | bc)
+              if [ "$SIZE" -gt "$budget" ]; then
+                echo "❌ $label: ${KB} KB (budget: ${BUDGET_KB} KB) EXCEEDED"
+                FAILED=1
+              else
+                echo "✅ $label: ${KB} KB (budget: ${BUDGET_KB} KB)"
+              fi
+            else
+              echo "⚠️  $label: file not found (dist/$file)"
+            fi
+          }
+
+          check_size "content.js"    51200   "Content script"
+          check_size "background.js" 204800  "Background"
+          check_size "popup.html"    512000  "Popup"
+
+          echo ""
+          if [ "$FAILED" = "1" ]; then
+            echo "❌ Bundle size check failed"
             exit 1
           fi
           echo "✅ All bundle size checks passed"
 
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-dist
+          path: dist/
+          retention-days: 7
+
+  # ── E2E tests ─────────────────────────────────────────────────────────────
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-dist
+          path: dist/
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install chromium --with-deps
+      - name: Run E2E tests
+        run: pnpm run test:e2e
+        env:
+          CI: true
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # ── Release packaging ──────────────────────────────────────────────────────
   release:
-    needs: ci
+    name: Release
+    needs: [test, build, e2e]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Download dist
+        uses: actions/download-artifact@v4
         with:
-          version: 9
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
+          name: extension-dist
+          path: dist/
       - name: Package extension
         run: |
           cd dist
           zip -r ../xtagger-${{ github.ref_name }}.zip .
+          sha256sum xtagger-${{ github.ref_name }}.zip > xtagger-${{ github.ref_name }}.zip.sha256
+          echo "ZIP size: $(du -sh ../xtagger-${{ github.ref_name }}.zip | cut -f1)"
       - name: Create release
         uses: forgejo/release-action@v1
         with:
-          files: xtagger-${{ github.ref_name }}.zip
+          files: |
+            xtagger-${{ github.ref_name }}.zip
+            xtagger-${{ github.ref_name }}.zip.sha256

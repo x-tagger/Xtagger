@@ -45,7 +45,8 @@ test.describe('Tag creation', () => {
       const host = document.querySelector('[data-xtagger-popover]') as HTMLElement;
       return host?.shadowRoot?.querySelector('.header-title')?.textContent ?? '';
     });
-    expect(title).toContain('@alice_dev');
+    // First user in mock feed is @elonmusk
+    expect(title).toContain('@elonmusk');
   });
 
   test('pressing Escape closes the popover', async ({ mockFeedPage: page }) => {
@@ -132,7 +133,7 @@ test.describe('Tag creation', () => {
     await popupPage.close();
   });
 
-  test('multiple users can be tagged', async ({ mockFeedPage: page }) => {
+  test('multiple users can be tagged — elonmusk, DonaldTrump, RupertLowe10', async ({ mockFeedPage: page }) => {
     const tagUser = async (index: number, tagName: string): Promise<void> => {
       const containers = page.locator('[data-testid="User-Name"]');
       await containers.nth(index).hover();
@@ -150,16 +151,16 @@ test.describe('Tag creation', () => {
       });
 
       await expect(page.locator('[data-xtagger-popover]')).not.toBeAttached({ timeout: 5000 });
-      // Brief pause for injection to process
       await page.waitForTimeout(300);
     };
 
-    await tagUser(0, 'multi-test-alpha');
-    await tagUser(1, 'multi-test-beta');
+    await tagUser(0, 'tech-billionaire');   // @elonmusk
+    await tagUser(1, 'politics-us');        // @DonaldTrump
+    await tagUser(2, 'politics-uk');        // @RupertLowe10
 
     const injectedCount = await page.evaluate(
       () => document.querySelectorAll('[data-xtagger-injected]').length,
     );
-    expect(injectedCount).toBeGreaterThanOrEqual(2);
+    expect(injectedCount).toBeGreaterThanOrEqual(3);
   });
 });

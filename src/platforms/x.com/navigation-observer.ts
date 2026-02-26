@@ -1,138 +1,142 @@
 /**
  * @module navigation-observer
  * @layer Platforms / X.com
- * @description Detects SPA navigation on X.com.
+ * @description Detects SPA navigation in X.com's React app.
  *
- * X.com is a single-page app using the History API (pushState/replaceState).
- * Standard DOM events don't fire for these navigations, so we patch the History API
- * and also watch for popstate (browser back/forward).
+ * X.com uses React Router's history.pushState / replaceState for all navigation
+ * rather than full page reloads. We monkey-patch both methods to fire a custom
+ * DOM event ('xtagger:navigation') that our observers listen for.
  *
- * Emits 'navigation:changed' on the EventBus after each route change.
+ * History API patching is idempotent: the guard flag lives on `window` so
+ * multiple NavigationObserver instances across tests or reinitialisation never
+ * double-wrap the methods.
  *
- * Dependencies: TypedEventBus
+ * Disposal: calling sub.dispose() (returned by observe()) removes the specific
+ * callback listeners. The history patch itself is not removed — it's lightweight
+ * and removal would require reference-counting or global coordination.
  */
 
-import type { TypedEventBus } from '@core/events/event-bus';
-import type { Disposable } from '@core/events/event-bus';
+import { EventBus }   from '@core/events/event-bus';
 import type { LoggerPort } from '@core/ports/logger.port';
+import type { Disposable } from '@core/events/event-bus';
 
-// ─── NavigationObserver ───────────────────────────────────────────────────────
+/** Flag key on window — prevents double-patching across multiple instances. */
+const PATCH_KEY = '_xtaggerHistoryPatched';
+
+/** Saved originals — allows test teardown to restore the history API. */
+const ORIGINALS_KEY = '_xtaggerHistoryOriginals';
+
+type HistoryOriginals = {
+  pushState: typeof window.history.pushState;
+  replaceState: typeof window.history.replaceState;
+};
 
 export class NavigationObserver {
   private currentUrl: string;
-  private patched = false;
-  private readonly disposables: Disposable[] = [];
+  private readonly bus: EventBus;
   private readonly log: LoggerPort;
 
-  constructor(
-    private readonly bus: TypedEventBus,
-    logger: LoggerPort,
-  ) {
+  constructor(bus: EventBus, logger: LoggerPort) {
+    this.bus        = bus;
+    this.log        = logger.child('NavigationObserver');
     this.currentUrl = window.location.href;
-    this.log = logger.child('NavigationObserver');
   }
 
   /**
    * Begin observing navigation events.
-   * Patches pushState/replaceState and listens for popstate.
-   * Returns a Disposable to stop observing.
+   * Returns a Disposable — call dispose() to unsubscribe this specific callback.
    */
   observe(callback: (newUrl: string, previousUrl: string) => void): Disposable {
-    if (!this.patched) {
-      this.patchHistoryApi();
-      this.patched = true;
-    }
+    // Patch once globally — safe to call multiple times
+    this.ensurePatched();
 
-    const handleNavigation = (newUrl: string, previousUrl: string) => {
-      callback(newUrl, previousUrl);
-    };
-
-    // Listen to our custom event (fired by the patched History API)
     const navListener = (e: Event): void => {
       const detail = (e as CustomEvent<{ newUrl: string; previousUrl: string }>).detail;
-      handleNavigation(detail.newUrl, detail.previousUrl);
+      // Update our own currentUrl tracker
+      this.currentUrl = detail.newUrl;
+      callback(detail.newUrl, detail.previousUrl);
     };
 
-    window.addEventListener('xtagger:navigation', navListener);
-
-    // Also catch browser back/forward (popstate)
     const popstateListener = (): void => {
       const newUrl = window.location.href;
       if (newUrl !== this.currentUrl) {
         const previousUrl = this.currentUrl;
         this.currentUrl = newUrl;
-        handleNavigation(newUrl, previousUrl);
+        callback(newUrl, previousUrl);
       }
     };
 
+    window.addEventListener('xtagger:navigation', navListener);
     window.addEventListener('popstate', popstateListener);
-
     this.log.debug('Navigation observer started');
 
     return {
       dispose: () => {
         window.removeEventListener('xtagger:navigation', navListener);
         window.removeEventListener('popstate', popstateListener);
-        this.log.debug('Navigation observer stopped');
+        this.log.debug('Navigation observer disposed');
       },
     };
   }
 
-  // ── History API patching ──────────────────────────────────────────────────
-
-  /**
-   * Monkey-patches History.pushState and History.replaceState to fire
-   * our custom 'xtagger:navigation' event. This is the standard approach
-   * for SPA navigation detection in content scripts.
-   *
-   * The patch is applied once and is idempotent.
-   */
-  private patchHistoryApi(): void {
-    const self = this;
-
-    const originalPush    = history.pushState.bind(history);
-    const originalReplace = history.replaceState.bind(history);
-
-    history.pushState = function (
-      data: unknown,
-      unused: string,
-      url?: string | URL | null,
-    ): void {
-      originalPush(data, unused, url);
-      self.onUrlChange();
-    };
-
-    history.replaceState = function (
-      data: unknown,
-      unused: string,
-      url?: string | URL | null,
-    ): void {
-      originalReplace(data, unused, url);
-      self.onUrlChange();
-    };
-
-    this.log.debug('History API patched for SPA navigation detection');
-  }
-
-  private onUrlChange(): void {
-    const newUrl = window.location.href;
-    if (newUrl === this.currentUrl) return;
-
-    const previousUrl = this.currentUrl;
-    this.currentUrl = newUrl;
-
-    this.log.debug('Navigation detected', { from: previousUrl, to: newUrl });
-    this.bus.emit('navigation:changed', { url: newUrl, previousUrl });
-
-    // Also dispatch a DOM event so our observe() callback can hear it
-    window.dispatchEvent(
-      new CustomEvent('xtagger:navigation', {
-        detail: { newUrl, previousUrl },
-      }),
-    );
-  }
-
   getCurrentUrl(): string {
     return this.currentUrl;
+  }
+
+  // ── History API patching ──────────────────────────────────────────────────
+
+  private ensurePatched(): void {
+    const win = window as Window & { [PATCH_KEY]?: boolean; [ORIGINALS_KEY]?: HistoryOriginals };
+    if (win[PATCH_KEY]) return;
+
+    // Save originals so tests (and future restore() calls) can undo the patch
+    win[ORIGINALS_KEY] = {
+      pushState:    window.history.pushState.bind(window.history),
+      replaceState: window.history.replaceState.bind(window.history),
+    };
+
+    const fire = (newUrl: string, previousUrl: string): void => {
+      if (newUrl === previousUrl) return;
+      this.bus.emit('navigation:changed', { url: newUrl, previousUrl });
+      window.dispatchEvent(new CustomEvent('xtagger:navigation', {
+        detail: { newUrl, previousUrl },
+      }));
+      this.log.debug('Navigation detected', { newUrl, previousUrl });
+    };
+
+    const origPush    = win[ORIGINALS_KEY].pushState;
+    const origReplace = win[ORIGINALS_KEY].replaceState;
+
+    window.history.pushState = function(
+      ...args: Parameters<typeof window.history.pushState>
+    ): void {
+      const prev = window.location.href;
+      origPush(...args);
+      fire(window.location.href, prev);
+    };
+
+    window.history.replaceState = function(
+      ...args: Parameters<typeof window.history.replaceState>
+    ): void {
+      const prev = window.location.href;
+      origReplace(...args);
+      fire(window.location.href, prev);
+    };
+
+    win[PATCH_KEY] = true;
+    this.log.debug('History API patched');
+  }
+
+  /**
+   * Restore the original history methods and clear the patch guard.
+   * Intended for use in tests only — not called in production.
+   */
+  static restoreForTesting(): void {
+    const win = window as Window & { [PATCH_KEY]?: boolean; [ORIGINALS_KEY]?: HistoryOriginals };
+    if (!win[PATCH_KEY] || !win[ORIGINALS_KEY]) return;
+    window.history.pushState    = win[ORIGINALS_KEY].pushState;
+    window.history.replaceState = win[ORIGINALS_KEY].replaceState;
+    delete win[PATCH_KEY];
+    delete win[ORIGINALS_KEY];
   }
 }
