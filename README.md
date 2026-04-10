@@ -23,7 +23,7 @@ XTagger injects coloured tag indicators next to usernames throughout X.com — i
 ### From source (developer mode)
 
 ```bash
-git clone https://forgejo.xtagger.dev/root/xtagger.git
+git clone https://forgejo.xtagger.dev/xtagger/xtagger.git
 cd xtagger
 pnpm install
 pnpm run build

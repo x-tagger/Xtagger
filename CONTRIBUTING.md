@@ -5,7 +5,7 @@ Welcome! XTagger is developed in the open. All contributions are valued — code
 ## Quick Start
 
 ```bash
-git clone https://forgejo.xtagger.dev/root/xtagger.git
+git clone https://forgejo.xtagger.dev/xtagger/xtagger.git
 cd xtagger
 pnpm install
 pnpm build
