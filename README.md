@@ -216,6 +216,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Key points:
 
 ## License
 
-MIT — see `LICENSE`.
+GPL-3.0-or-later — see [LICENSE](./LICENSE).
 
 Built with ❤️ by the XTagger contributors.
