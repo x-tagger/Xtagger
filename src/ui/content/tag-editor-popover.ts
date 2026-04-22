@@ -430,9 +430,27 @@ export class TagEditorPopover {
     });
 
     // ── Name / autocomplete ──
+    // Adopt the canonical colour whenever the input settles on an existing
+    // tag name — either via autocomplete click or direct typing of an exact
+    // (case-insensitive) match. Without this, typing "funny" and hitting Save
+    // uses whatever palette colour is currently selected, not the colour of
+    // the existing "funny" tag.
+    // Pre-Option-A, "canonical" here means first-match-by-case-insensitive
+    // lookup over allTagColors — deterministic by Map insertion order but
+    // not yet a guaranteed invariant across rows sharing a name. Post-Option-A
+    // migration, case-normalisation reduces each equivalence class to one
+    // name with one colour, so this becomes a true canonical lookup.
+    const adoptCanonicalColour = (name: string): void => {
+      const needle = name.trim().toLowerCase();
+      if (!needle) return;
+      for (const [k, v] of this.allTagColors) {
+        if (k.toLowerCase() === needle) { selectSwatch(v.colorIndex); return; }
+      }
+    };
     nameInput.addEventListener('input', () => {
-      this.updateAutocomplete(nameInput, autocomplete);
+      this.updateAutocomplete(nameInput, autocomplete, adoptCanonicalColour);
       nameError.classList.remove('visible');
+      adoptCanonicalColour(nameInput.value);
     });
     nameInput.addEventListener('keydown', (e) => {
       if ((e as KeyboardEvent).key === 'Enter') {
@@ -560,7 +578,11 @@ export class TagEditorPopover {
 
   // ── Autocomplete ──────────────────────────────────────────────────────────
 
-  private updateAutocomplete(input: HTMLInputElement, container: HTMLDivElement): void {
+  private updateAutocomplete(
+    input: HTMLInputElement,
+    container: HTMLDivElement,
+    onPick: (name: string) => void,
+  ): void {
     const query = input.value.toLowerCase().trim();
     if (!query) { container.classList.remove('open'); return; }
 
@@ -576,9 +598,11 @@ export class TagEditorPopover {
     container.classList.add('open');
     container.querySelectorAll('.autocomplete-item').forEach(item => {
       item.addEventListener('click', () => {
-        input.value = (item as HTMLElement).dataset['name'] ?? '';
+        const picked = (item as HTMLElement).dataset['name'] ?? '';
+        input.value = picked;
         container.classList.remove('open');
         input.focus();
+        onPick(picked);
       });
     });
   }
