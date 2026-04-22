@@ -65,8 +65,18 @@ export class IDBAdapter implements StoragePort {
       const req = indexedDB.open(this.dbName, DB_VERSION);
 
       req.onupgradeneeded = (e) => {
-        const db = (e.target as IDBOpenDBRequest).result;
-        this.setupSchema(db, e.oldVersion);
+        const openReq = e.target as IDBOpenDBRequest;
+        const db = openReq.result;
+        const tx = openReq.transaction;
+        // The versionchange transaction is non-null during onupgradeneeded by
+        // spec. If the browser somehow violates that, skip the upgrade (which
+        // would leave pre-v2 DBs with missing indexes still broken) and log
+        // so the outage is diagnosable rather than silent.
+        if (!tx) {
+          this.log.warn('onupgradeneeded fired without a versionchange transaction; schema upgrade skipped', { oldVersion: e.oldVersion, newVersion: e.newVersion });
+          return;
+        }
+        this.setupSchema(db, e.oldVersion, tx);
       };
 
       req.onsuccess = (e) => {
@@ -83,7 +93,7 @@ export class IDBAdapter implements StoragePort {
     });
   }
 
-  private setupSchema(db: IDBDatabase, oldVersion: number): void {
+  private setupSchema(db: IDBDatabase, oldVersion: number, tx: IDBTransaction): void {
     if (oldVersion < 1) {
       const users = db.createObjectStore(STORE_USERS, { keyPath: '_key' });
       users.createIndex('platformId', 'platformId', { unique: false });
@@ -98,6 +108,39 @@ export class IDBAdapter implements StoragePort {
       tags.createIndex(IDX_TAG_DELETED,  'deletedAt', { unique: false });
 
       db.createObjectStore(STORE_META, { keyPath: 'key' });
+    }
+
+    // v1 → v2: idempotently restore any v1 indexes missing on pre-existing
+    // DBs. Schema self-repair only — no row reads, no row writes. Each
+    // createIndex is gated by indexNames.contains(), so the branch is a
+    // no-op when indexes are already present and creates exactly what's
+    // missing otherwise. Options (unique, multiEntry) and keyPath match the
+    // v1 definitions above verbatim. Everything runs inside the upgrade
+    // transaction passed in from onupgradeneeded.
+    if (oldVersion < 2) {
+      const tagsStore = tx.objectStore(STORE_TAGS);
+      const ensureTagIndex = (name: string, keyPath: string): void => {
+        if (!tagsStore.indexNames.contains(name)) {
+          tagsStore.createIndex(name, keyPath, { unique: false });
+          this.log.info('Backfilled missing tag index', { name, keyPath });
+        }
+      };
+      ensureTagIndex(IDX_TAG_USERNAME, '_username');
+      ensureTagIndex('_platform',      '_platform');
+      ensureTagIndex(IDX_TAG_NAME,     'name');
+      ensureTagIndex(IDX_TAG_CREATED,  'createdAt');
+      ensureTagIndex(IDX_TAG_DELETED,  'deletedAt');
+
+      const usersStore = tx.objectStore(STORE_USERS);
+      const ensureUserIndex = (name: string, keyPath: string): void => {
+        if (!usersStore.indexNames.contains(name)) {
+          usersStore.createIndex(name, keyPath, { unique: false });
+          this.log.info('Backfilled missing user index', { name, keyPath });
+        }
+      };
+      ensureUserIndex('platformId', 'platformId');
+      ensureUserIndex('platform',   'platform');
+      ensureUserIndex('lastSeen',   'lastSeen');
     }
   }
 

@@ -12,7 +12,13 @@ export const MIN_SUPPORTED_IMPORT_VERSION = 1;
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
 export const DB_NAME = 'xtagger_db';
-export const DB_VERSION = 1;
+/**
+ * IDB native schema version — increments drive onupgradeneeded. Distinct from
+ * META_KEY_SCHEMA_VERSION, which tracks application-level row migrations.
+ *   v1: initial stores + indexes
+ *   v2: idempotent backfill of any v1 indexes missing on pre-existing DBs
+ */
+export const DB_VERSION = 2;
 export const STORE_USERS = 'users';
 export const STORE_TAGS = 'tags';
 export const STORE_META = 'meta';
