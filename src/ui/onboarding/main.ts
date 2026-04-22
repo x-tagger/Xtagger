@@ -23,7 +23,7 @@ const STEPS = [
   {
     icon: '👁️',
     title: 'Tags appear in your feed',
-    body: 'Coloured dots (or pills) will now appear next to that person\'s name <strong>everywhere</strong> they appear on X.com — in your feed, replies, search results.',
+    body: 'Coloured dots appear next to @handles wherever you see them on x.com — feed, replies, search, profiles.',
     img: null,
   },
   {
