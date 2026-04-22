@@ -53,7 +53,7 @@ export class TagEditorPopover {
   private shadow: ShadowRoot   | null = null;
   private selectedColorIndex          = 0;
   private allTagNames:  string[]      = [];
-  private allTagColors: Map<string, { hex: string; textColor: string }> = new Map();
+  private allTagColors: Map<string, { hex: string; textColor: string; colorIndex: number }> = new Map();
   private userTags:     Tag[]         = [];
 
   constructor(private readonly log: { debug: (m:string, d?:object) => void; error: (m:string, d?:object) => void }) {}
@@ -82,7 +82,7 @@ export class TagEditorPopover {
       for (const { tags } of queryResult.data.users) {
         for (const t of tags) {
           const c = getColor(t.colorIndex);
-          this.allTagColors.set(t.name, { hex: c.hex, textColor: c.textColor });
+          this.allTagColors.set(t.name, { hex: c.hex, textColor: c.textColor, colorIndex: t.colorIndex });
         }
       }
     }
@@ -145,7 +145,10 @@ export class TagEditorPopover {
           const bg  = qc?.hex      ?? '#1e2230';
           const fg  = qc?.textColor ?? '#c9cdd4';
           const border = qc ? 'transparent' : '#2a2d36';
-          return `<button type="button" class="quick-pill" data-name="${n}"
+          // data-color-index carries the canonical colour for this tag name.
+          // Clicking the pill saves with THIS colour, not whatever the palette is on.
+          const ci = qc?.colorIndex;
+          return `<button type="button" class="quick-pill" data-name="${n}"${ci !== undefined ? ` data-color-index="${ci}"` : ''}
             style="background:${bg};color:${fg};border-color:${border};">${n}</button>`;
         }).join('')}
       </div>` : '';
@@ -365,8 +368,13 @@ export class TagEditorPopover {
       if (!pill) return;
       const name = pill.dataset['name'] ?? '';
       if (!name) return;
-      // Use currently selected colour, or default 0
-      await this.saveTag(opts, name, undefined, this.selectedColorIndex);
+      // Pill-wins: save with the pill's own data-color-index. Only fall back to the
+      // current palette selection when the pill has no canonical colour, which today
+      // means data-color-index is absent (tag name never stored before).
+      const raw = pill.dataset['colorIndex'];
+      const parsed = raw !== undefined ? Number(raw) : Number.NaN;
+      const colorIndex = Number.isFinite(parsed) ? parsed : this.selectedColorIndex;
+      await this.saveTag(opts, name, undefined, colorIndex);
     });
 
     // ── Palette ──
