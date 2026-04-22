@@ -86,8 +86,15 @@ async function boot(): Promise<void> {
   const popover      = new TagEditorPopover(logger);
   const hoverTrigger = new HoverTrigger(logger);
 
-  function onTagSaved(userId: UserIdentifier, tag: Tag): void {
-    bus.emit('tag:created', { tag, userId });
+  // Emit tag:updated for edits (previous !== undefined), tag:created for pure
+  // creates. The previous argument is threaded through by TagEditorPopover
+  // exactly for this branching — don't infer from mode-at-open or id matches.
+  function onTagSaved(userId: UserIdentifier, tag: Tag, previous?: Tag): void {
+    if (previous !== undefined) {
+      bus.emit('tag:updated', { tag, userId, previous });
+    } else {
+      bus.emit('tag:created', { tag, userId });
+    }
   }
   function onTagDeleted(userId: UserIdentifier, tagId: string): void {
     bus.emit('tag:deleted', { tagId, userId, soft: false });
@@ -99,9 +106,9 @@ async function boot(): Promise<void> {
         mode: 'add',
         userId,
         anchor,
-        onSaved:   (tag)   => onTagSaved(userId, tag),
-        onDeleted: (tagId) => onTagDeleted(userId, tagId),
-        onClosed:  ()      => { /* nothing */ },
+        onSaved:   (tag, previous) => onTagSaved(userId, tag, previous),
+        onDeleted: (tagId)         => onTagDeleted(userId, tagId),
+        onClosed:  ()              => { /* nothing */ },
       });
     },
     onEditTag(userId, tag, anchor) {
@@ -110,9 +117,9 @@ async function boot(): Promise<void> {
         userId,
         anchor,
         existingTag: tag,
-        onSaved:   (saved) => onTagSaved(userId, saved),
-        onDeleted: (tagId) => onTagDeleted(userId, tagId),
-        onClosed:  ()      => { /* nothing */ },
+        onSaved:   (saved, previous) => onTagSaved(userId, saved, previous),
+        onDeleted: (tagId)           => onTagDeleted(userId, tagId),
+        onClosed:  ()                => { /* nothing */ },
       });
     },
   });

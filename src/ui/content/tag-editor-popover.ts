@@ -36,7 +36,8 @@ interface PopoverOptions {
   userId:      UserIdentifier;
   anchor:      Element;
   existingTag?: Tag;
-  onSaved:     (tag: Tag)     => void;
+  /** Called after a successful save. `previous` is the pre-edit tag in edit mode, undefined on create. */
+  onSaved:     (tag: Tag, previous?: Tag) => void;
   onDeleted:   (tagId: string) => void;
   onClosed:    ()              => void;
 }
@@ -567,7 +568,10 @@ export class TagEditorPopover {
           : `Tag "${savedTag.name}" updated`,
         'polite',
       );
-      opts.onSaved(savedTag);
+      // Pass the pre-edit tag when in edit mode so the consumer can emit
+      // tag:updated (with previous) rather than tag:created. Quick-pill saves
+      // at :524 never hit this path, so they naturally stay single-arg.
+      opts.onSaved(savedTag, opts.mode === 'edit' ? opts.existingTag : undefined);
     } else {
       if (saveBtn) {
         saveBtn.disabled = false;
