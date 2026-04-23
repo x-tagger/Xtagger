@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Personal, local-first annotation layer for X.com. Tag people with custom labels, see them everywhere, share collections — all offline.",
   "homepage_url": "https://xtagger.dev",
-  "permissions": ["storage", "activeTab", "contextMenus", "tabs"],
+  "permissions": ["activeTab", "contextMenus"],
   "host_permissions": [
     "https://x.com/*",
     "https://twitter.com/*"

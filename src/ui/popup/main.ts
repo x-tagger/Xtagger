@@ -432,7 +432,7 @@ function renderSettings(container: HTMLElement): void {
     await sendMessage({ channel: 'settings:save', payload: state.settings });
 
     // Broadcast to any open X.com tabs
-    const tabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] });
+    const tabs = await chrome.tabs.query({ url: ['https://x.com/*', 'https://twitter.com/*'] });
     for (const tab of tabs) {
       if (tab.id) {
         chrome.tabs.sendMessage(tab.id, {
