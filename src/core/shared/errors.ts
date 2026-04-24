@@ -47,7 +47,8 @@ export type TagError =
   | { readonly type: 'TAG_NAME_EMPTY'; readonly message: string }
   | { readonly type: 'TAG_NAME_TOO_LONG'; readonly message: string; readonly maxLength: number; readonly actual: number }
   | { readonly type: 'TAG_NOTES_TOO_LONG'; readonly message: string; readonly maxLength: number; readonly actual: number }
-  | { readonly type: 'TAG_INVALID_COLOR'; readonly message: string; readonly colorIndex: number };
+  | { readonly type: 'TAG_INVALID_COLOR'; readonly message: string; readonly colorIndex: number }
+  | { readonly type: 'TAG_NAME_DUPLICATE'; readonly message: string; readonly name: string; readonly existingTagId: string };
 
 // ─── User Errors ──────────────────────────────────────────────────────────────
 
@@ -103,4 +104,11 @@ export const importValidationFailed = (
   field,
   expected,
   received,
+});
+
+export const tagNameDuplicate = (name: string, existingTagId: string): TagError => ({
+  type: 'TAG_NAME_DUPLICATE',
+  message: `Tag "${name}" already exists`,
+  name,
+  existingTagId,
 });

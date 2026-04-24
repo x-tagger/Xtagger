@@ -78,6 +78,21 @@ export class TagService {
       });
     }
 
+    const normalisedName = parseResult.data.name.trim().toLowerCase();
+    const existingResult = await this.storage.getTagsForUser(userId);
+    if (!existingResult.ok) return existingResult;
+    const collision = existingResult.value.find(
+      (t) => t.name.trim().toLowerCase() === normalisedName,
+    );
+    if (collision) {
+      return err({
+        type: 'TAG_NAME_DUPLICATE',
+        message: `Tag "${parseResult.data.name}" already exists`,
+        name: parseResult.data.name,
+        existingTagId: collision.id,
+      });
+    }
+
     const now = Date.now();
     const tag: Tag = {
       id: uuidv7(),

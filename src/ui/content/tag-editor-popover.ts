@@ -522,6 +522,8 @@ export class TagEditorPopover {
       this.close();
       announce(`Tag "${res.data.name}" added to @${opts.userId.username}`, 'polite');
       opts.onSaved(res.data);
+    } else if (res.error?.type === 'TAG_NAME_DUPLICATE') {
+      announce(res.error.message, 'assertive');
     }
   }
 
@@ -548,7 +550,18 @@ export class TagEditorPopover {
           colorIndex: this.selectedColorIndex, notes,
         } satisfies CreateTagRequest,
       });
-      if (res.ok && res.data) savedTag = res.data;
+      if (res.ok && res.data) {
+        savedTag = res.data;
+      } else if (res.error?.type === 'TAG_NAME_DUPLICATE') {
+        nameError.textContent = res.error.message;
+        nameError.classList.add('visible');
+        nameInput.focus();
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Add tag';
+        }
+        return;
+      }
     } else {
       const res = await sendMessage<UpdateTagResponse>({
         channel: 'tags:update',
