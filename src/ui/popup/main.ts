@@ -14,6 +14,7 @@
  */
 
 import { sendMessage } from '@shared/messages';
+import { escapeHtml } from '@shared/escape-html';
 import { getColor, getBasePalette } from '@core/services/color-palette';
 import { DEFAULT_SETTINGS } from '@core/model/entities';
 import type { ExtensionSettings } from '@core/model/entities';
@@ -141,7 +142,7 @@ async function loadResults(): Promise<void> {
 
   if (users.length === 0) {
     resultsEl.innerHTML = state.searchQuery
-      ? `<div class="empty">No results for "<strong>${escHtml(state.searchQuery)}</strong>"</div>`
+      ? `<div class="empty">No results for "<strong>${escapeHtml(state.searchQuery)}</strong>"</div>`
       : `<div class="empty">
            <div class="empty-icon">🏷️</div>
            <div>No tagged users yet.</div>
@@ -157,14 +158,14 @@ async function loadResults(): Promise<void> {
   const userHTML = users.map(({ user, tags }) => {
     const pillsHTML = tags.map(t => {
       const c = getColor(t.colorIndex);
-      return `<span class="tag-pill" style="background:${c.hex};color:${c.textColor};" title="${escHtml(t.notes ?? '')}">${escHtml(t.name)}</span>`;
+      return `<span class="tag-pill" style="background:${c.hex};color:${c.textColor};" title="${escapeHtml(t.notes ?? '')}">${escapeHtml(t.name)}</span>`;
     }).join('');
 
     return `
-      <div class="user-row" data-username="${escHtml(user.username)}">
+      <div class="user-row" data-username="${escapeHtml(user.username)}">
         <div class="user-info">
-          <span class="username">@${escHtml(user.username)}</span>
-          ${user.displayName ? `<span class="display-name">${escHtml(user.displayName)}</span>` : ''}
+          <span class="username">@${escapeHtml(user.username)}</span>
+          ${user.displayName ? `<span class="display-name">${escapeHtml(user.displayName)}</span>` : ''}
         </div>
         <div class="user-tags">${pillsHTML}</div>
       </div>
@@ -239,7 +240,7 @@ function renderImport(container: HTMLElement): void {
     });
 
     if (!res.ok || !res.data) {
-      previewEl.innerHTML = `<div class="error-box">Invalid format: ${escHtml(String(res.error?.message ?? 'unknown error'))}</div>`;
+      previewEl.innerHTML = `<div class="error-box">Invalid format: ${escapeHtml(String(res.error?.message ?? 'unknown error'))}</div>`;
       return;
     }
 
@@ -289,7 +290,7 @@ function renderImport(container: HTMLElement): void {
       previewEl.innerHTML = '<div class="success-box">✓ Import complete! Reload X.com to see updated tags.</div>';
       importBtn.textContent = 'Done';
     } else {
-      previewEl.innerHTML = `<div class="error-box">Import failed: ${escHtml(String(res.error?.message))}</div>`;
+      previewEl.innerHTML = `<div class="error-box">Import failed: ${escapeHtml(String(res.error?.message))}</div>`;
       importBtn.disabled = false;
       importBtn.textContent = 'Import';
     }
@@ -346,7 +347,7 @@ function renderExport(container: HTMLElement): void {
 
       <div class="export-section">
         <label class="export-label">XTAG: compact <span class="hint-inline">(share in a DM/tweet)</span></label>
-        <textarea class="compact-output" readonly rows="3">${escHtml(compact)}</textarea>
+        <textarea class="compact-output" readonly rows="3">${escapeHtml(compact)}</textarea>
         <button class="btn-secondary" id="btn-copy-compact">⧉ Copy XTAG</button>
       </div>
     `;
@@ -416,7 +417,7 @@ function renderSettings(container: HTMLElement): void {
     <div id="settings-status" class="settings-status"></div>
 
     <div class="version-info">
-      v${escHtml(state.version)} · schema v${state.schemaVersion}
+      v${escapeHtml(state.version)} · schema v${state.schemaVersion}
     </div>
   `;
 
@@ -453,10 +454,6 @@ function renderSettings(container: HTMLElement): void {
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
-
-function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 
 function flashBtn(id: string, label: string): void {
   const btn = document.getElementById(id) as HTMLButtonElement | null;

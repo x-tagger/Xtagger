@@ -26,6 +26,7 @@ import type {
 } from '@shared/messages';
 
 import { sendMessage }   from '@shared/messages';
+import { escapeHtml }    from '@shared/escape-html';
 import { getColor, getExtendedPalette } from '@core/services/color-palette';
 import { announce }      from './announcer';
 
@@ -149,23 +150,25 @@ export class TagEditorPopover {
           // data-color-index carries the canonical colour for this tag name.
           // Clicking the pill saves with THIS colour, not whatever the palette is on.
           const ci = qc?.colorIndex;
-          return `<button type="button" class="quick-pill" data-name="${n}"${ci !== undefined ? ` data-color-index="${ci}"` : ''}
-            style="background:${bg};color:${fg};border-color:${border};">${n}</button>`;
+          const safeName = escapeHtml(n);
+          return `<button type="button" class="quick-pill" data-name="${safeName}"${ci !== undefined ? ` data-color-index="${ci}"` : ''}
+            style="background:${bg};color:${fg};border-color:${border};">${safeName}</button>`;
         }).join('')}
       </div>` : '';
 
     // ── User's current tags ──
     const userTagsHTML = this.userTags.length > 0 ? `
       <hr class="divider"/>
-      <div class="section-label">@${username}'s tags</div>
+      <div class="section-label">@${escapeHtml(username)}'s tags</div>
       <div class="existing-tags">
         ${this.userTags.map(t => {
           const c = getColor(t.colorIndex);
           const active = isEdit && t.id === tag?.id;
+          const safeName = escapeHtml(t.name);
           return `<button type="button" class="existing-pill${active ? ' active' : ''}"
-            data-tag-id="${t.id}" data-tag-name="${t.name}" data-color="${t.colorIndex}"
+            data-tag-id="${escapeHtml(t.id)}" data-tag-name="${safeName}" data-color="${t.colorIndex}"
             style="background:${c.hex};color:${c.textColor};"
-            title="${t.notes ?? ''}">${t.name}</button>`;
+            title="${escapeHtml(t.notes ?? '')}">${safeName}</button>`;
         }).join('')}
       </div>` : '';
 
@@ -296,7 +299,7 @@ export class TagEditorPopover {
 
       <div class="popover" role="dialog" aria-label="Tag editor" tabindex="-1">
         <div class="header">
-          <span class="header-title">${isEdit ? `Edit tag · @${username}` : `Tag @${username}`}</span>
+          <span class="header-title">${isEdit ? `Edit tag · @${escapeHtml(username)}` : `Tag @${escapeHtml(username)}`}</span>
           <button type="button" class="close-btn" id="xt-close" aria-label="Close">✕</button>
         </div>
         <div class="body">
@@ -310,7 +313,7 @@ export class TagEditorPopover {
             <div style="position:relative;">
               <input type="text" id="xt-name" maxlength="50"
                 placeholder="Tag name…"
-                value="${isEdit ? (tag?.name ?? '') : ''}"
+                value="${isEdit ? escapeHtml(tag?.name ?? '') : ''}"
                 autocomplete="off" spellcheck="false"/>
               <div class="autocomplete" id="xt-autocomplete"></div>
             </div>
@@ -330,7 +333,7 @@ export class TagEditorPopover {
             </button>
             <textarea id="xt-notes" maxlength="500" placeholder="Optional context…"
               class="${isEdit && tag?.notes ? 'visible' : ''}"
-            >${isEdit ? (tag?.notes ?? '') : ''}</textarea>
+            >${isEdit ? escapeHtml(tag?.notes ?? '') : ''}</textarea>
             <div class="char-count" id="xt-char-count"
               style="display:${isEdit && tag?.notes ? 'block' : 'none'}">
               ${(tag?.notes?.length ?? 0)}/500
@@ -609,9 +612,10 @@ export class TagEditorPopover {
 
     if (matches.length === 0) { container.classList.remove('open'); return; }
 
-    container.innerHTML = matches.map(n =>
-      `<div class="autocomplete-item" data-name="${n}">${n}</div>`
-    ).join('');
+    container.innerHTML = matches.map(n => {
+      const safeName = escapeHtml(n);
+      return `<div class="autocomplete-item" data-name="${safeName}">${safeName}</div>`;
+    }).join('');
     container.classList.add('open');
     container.querySelectorAll('.autocomplete-item').forEach(item => {
       item.addEventListener('click', () => {
