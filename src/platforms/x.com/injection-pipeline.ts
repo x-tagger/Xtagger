@@ -168,8 +168,11 @@ export class InjectionPipeline {
     });
 
     if (!response.ok || !response.data) {
-      // Store empty array so we don't retry on every scroll
-      this.tagCache.set(username, []);
+      this.log.warn('Tag fetch failed; leaving cache unset to allow retry on next DOM mutation', {
+        username,
+        platform: this.platform.platformId,
+        error: response.ok ? 'missing-data' : response.error,
+      });
       return;
     }
 
