@@ -6,6 +6,11 @@ Version scheme: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-24
+
+### Changed
+- Trim extension description to 132-char Chrome Web Store limit
+
 ### Added (Phase 1 — Storage Layer)
 - `IDBAdapter` — full `StoragePort` implementation using IndexedDB
   - Tag CRUD with indexed queries
