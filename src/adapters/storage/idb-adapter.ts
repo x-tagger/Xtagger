@@ -49,6 +49,7 @@ const IDX_TAG_DELETED   = 'deletedAt';
 
 export class IDBAdapter implements StoragePort {
   private db: IDBDatabase | null = null;
+  private openPromise: Promise<Result<void, StorageError>> | null = null;
   private readonly log: LoggerPort;
   private readonly dbName: string;
 
@@ -61,7 +62,9 @@ export class IDBAdapter implements StoragePort {
 
   async open(): Promise<Result<void, StorageError>> {
     if (this.db) return ok(undefined);
-    return new Promise((resolve) => {
+    if (this.openPromise) return this.openPromise;
+
+    this.openPromise = new Promise((resolve) => {
       const req = indexedDB.open(this.dbName, DB_VERSION);
 
       req.onupgradeneeded = (e) => {
@@ -91,6 +94,13 @@ export class IDBAdapter implements StoragePort {
         resolve(err({ type: 'STORAGE_READ_FAILED', message: `Failed to open DB: ${error?.message ?? 'unknown'}` }));
       };
     });
+
+    const result = await this.openPromise;
+    // Null the cached promise on failure so subsequent callers retry. On
+    // success, leave it cached — this.db is set and the early-return at :63
+    // short-circuits further calls without touching the promise.
+    if (!result.ok) this.openPromise = null;
+    return result;
   }
 
   private setupSchema(db: IDBDatabase, oldVersion: number, tx: IDBTransaction): void {
