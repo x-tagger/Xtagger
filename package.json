@@ -1,6 +1,6 @@
 {
   "name": "xtagger",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first annotation layer for social media platforms",
   "type": "module",
   "scripts": {

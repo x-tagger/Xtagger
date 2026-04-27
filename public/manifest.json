@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "XTagger",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Personal, local-first annotation layer for X.com. Tag people with labels, see them everywhere, share collections — all offline.",
   "homepage_url": "https://xtagger.dev",
   "permissions": ["activeTab", "contextMenus"],

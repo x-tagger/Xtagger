@@ -4,12 +4,22 @@ All notable changes to XTagger are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version scheme: [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.1] - 2026-04-27
+
+### Fixed
+- Tag-editor popover no longer renders empty (no quick-assign, no existing tags) on first open of a fresh browser session. The `chrome.runtime.onMessage` listener now registers synchronously at SW top-level eval, gated by an init promise, instead of after `await storage.open()` where Chrome could dispatch the wakeup message into the gap before the listener existed
 
 ## [0.2.0] — 2026-04-24
 
 ### Changed
 - Trim extension description to 132-char Chrome Web Store limit
+
+### Fixed
+- Escape user-supplied tag content at the render boundary (XSS hardening)
+- Dedupe concurrent `IDBAdapter.open()` calls onto a single `indexedDB.open` request, preventing the lost-race `err()` that left the message router unregistered when `initialise()` and `onInstalled` / `onStartup` opened storage in parallel
+
+### Build
+- Align `scripts/package-extension.ts` validator paths with Vite's HTML emit layout
 
 ### Added (Phase 1 — Storage Layer)
 - `IDBAdapter` — full `StoragePort` implementation using IndexedDB
