@@ -32,16 +32,29 @@ const router       = new MessageRouter(tagService, importExport, storage, logger
 const contextMenu  = new ContextMenuManager(logger);
 
 // ─── Initialisation ───────────────────────────────────────────────────────────
+//
+// MV3 service workers must register chrome.runtime.onMessage synchronously
+// during the script's initial top-level evaluation. If registration is gated
+// behind an `await`, Chrome can dispatch the wakeup-causing message into the
+// gap, the response port closes without a sendResponse, and the caller sees
+// MESSAGE_NO_HANDLER. We therefore register the listener synchronously here
+// and gate the actual dispatch behind an init promise the listener awaits.
 
-async function initialise(): Promise<void> {
-  const openResult = await storage.open();
-  if (!openResult.ok) {
-    logger.error('Failed to open IDB on startup', { error: openResult.error });
-    return;
-  }
-  router.register();
-  logger.info('Background ready', { version: chrome.runtime.getManifest().version });
-}
+const initPromise: Promise<boolean> = storage.open()
+  .then((openResult) => {
+    if (!openResult.ok) {
+      logger.error('Failed to open IDB on startup', { error: openResult.error });
+      return false;
+    }
+    logger.info('Background ready', { version: chrome.runtime.getManifest().version });
+    return true;
+  })
+  .catch((e: unknown) => {
+    logger.error('Fatal error during background initialisation', { error: String(e) });
+    return false;
+  });
+
+router.register(initPromise);
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -90,12 +103,6 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   contextMenu.handleClick(info, tab);
-});
-
-// ─── Boot ─────────────────────────────────────────────────────────────────────
-
-initialise().catch((e: unknown) => {
-  logger.error('Fatal error during background initialisation', { error: String(e) });
 });
 
 export {};

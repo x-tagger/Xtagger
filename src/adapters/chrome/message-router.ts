@@ -44,9 +44,12 @@ export class MessageRouter {
 
   /**
    * Register all message handlers with chrome.runtime.
-   * Call once during service worker startup.
+   * MUST be called synchronously during the SW's top-level eval so the
+   * listener is live by the time Chrome dispatches the wakeup message.
+   * Real dispatch is gated behind initPromise — which resolves once IDB
+   * is open — so a message that arrives mid-init still gets a response.
    */
-  register(): void {
+  register(initPromise: Promise<boolean>): void {
     chrome.runtime.onMessage.addListener(
       (message: unknown, _sender, sendResponse) => {
         if (typeof message !== 'object' || message === null) return false;
@@ -55,7 +58,16 @@ export class MessageRouter {
 
         this.log.debug('Message received', { channel });
 
-        this.handle(channel, payload)
+        initPromise
+          .then((ready): MessageResponse | Promise<MessageResponse> => {
+            if (!ready) {
+              return {
+                ok: false,
+                error: { type: 'MESSAGE_NO_HANDLER', message: 'Background init failed (IDB open)', channel },
+              };
+            }
+            return this.handle(channel, payload);
+          })
           .then(sendResponse)
           .catch((e: unknown) => {
             this.log.error('Message handler threw', { channel, error: String(e) });
