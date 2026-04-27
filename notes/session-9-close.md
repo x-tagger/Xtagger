@@ -20,6 +20,7 @@
 - D1-D6 XSS investigation. Session 5's audit flagged six render-boundary export/import vectors. eca7836's commit message says "render boundary"; need to confirm whether all six are closed by that fix or some remain open.
 - Spam account cleanup in Forgejo user list. Now that registration is disabled, sweep existing users for any that snuck in during the open window.
 - GitHub link on xtagger.dev. Pre-existing known-broken mirror (per prior-session audit). Fix or remove from site.
+- Drop `activeTab` from manifest in v0.2.2. Session 11 audit confirmed no call sites depend on it. One-line manifest delta. Smoke matrix: toolbar-click popup, context-menu Tag/Open, fresh-install onboarding tab. Verify `chrome.action.openPopup()` still works without activeTab before shipping.
 
 ## Durable learnings (memory-flushed)
 
